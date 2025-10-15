@@ -16,14 +16,13 @@ if db_uri and db_uri.startswith("postgres://"):
 
 app.config['SQLALCHEMY_DATABASE_URI'] = db_uri
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
-app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', 'una-clave-secreta-por-defecto')
+app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', 'una-clave-secreta-por-defecto-muy-segura')
 
 # Inicializar la extensión de SQLAlchemy
 db = SQLAlchemy(app)
 
-# --- DEFINICIÓN DE LOS MODELOS DE LA BASE DE DATOS ---
-# Moviendo los modelos aquí se resuelve el error de importación circular
 
+# --- DEFINICIÓN DE LOS MODELOS DE LA BASE DE DATOS ---
 class User(db.Model):
     __tablename__ = 'users'
     id = db.Column(db.Integer, primary_key=True)
@@ -50,6 +49,7 @@ class BotConfig(db.Model):
     whatsapp_number = db.Column(db.String(50), nullable=True)
     welcome_message = db.Column(db.Text, nullable=True)
 
+
 # --- RUTAS DE LA APLICACIÓN ---
 
 # Rutas para servir las páginas HTML principales
@@ -57,7 +57,7 @@ class BotConfig(db.Model):
 def index():
     return render_template('Index.html')
 
-@app.route('/menu')
+@app.route('/menu_admin')
 def menu_admin():
     return render_template('Menu.html')
 
@@ -68,9 +68,11 @@ def menu_soporte():
 # Rutas para el contenido del iframe
 @app.route('/page/<path:page_name>')
 def show_page(page_name):
+    # Por seguridad, solo permitir archivos .html
     if not page_name.endswith('.html'):
         return "Not Found", 404
     return render_template(page_name)
+
 
 # --- API ENDPOINTS ---
 
@@ -85,7 +87,11 @@ def login():
 
     user = User.query.filter_by(username=username).first()
 
+    # --- CORRECCIÓN CLAVE ---
+    # Se elimina el parámetro 'method' de check_password_hash.
+    # La función detecta el método automáticamente desde el hash almacenado.
     if user and check_password_hash(user.password_hash, password):
+        # El rol determina a qué menú redirigir
         redirect_url = 'menu_admin' if user.role == 'Admin' else 'menu_soporte'
         return jsonify({
             "success": True,
@@ -95,18 +101,24 @@ def login():
     else:
         return jsonify({"success": False, "message": "Usuario o contraseña incorrectos"}), 401
 
-# --- Endpoints para la gestión de Usuarios ---
 
+# --- Endpoints para la gestión de Usuarios ---
 @app.route('/api/users', methods=['GET'])
 def get_users():
     users = User.query.all()
-    return jsonify([{'id': user.id, 'name': user.name, 'role': user.role} for user in users])
+    # No enviar el hash de la contraseña al frontend
+    return jsonify([{'id': user.id, 'name': user.name, 'role': user.role, 'username': user.username} for user in users])
 
 @app.route('/api/users', methods=['POST'])
 def add_user():
     data = request.get_json()
-    # Añadido un nombre de usuario por defecto si no se proporciona
+    # Generar un nombre de usuario a partir del nombre completo si no se proporciona
     username = data.get('username') or data.get('name', '').replace(' ', '_').lower()
+    
+    # Verificar si el usuario ya existe
+    if User.query.filter_by(username=username).first():
+        return jsonify({'message': 'El nombre de usuario ya existe'}), 409
+
     hashed_password = generate_password_hash(data['password'], method='pbkdf2:sha256')
     new_user = User(
         username=username, 
@@ -124,8 +136,11 @@ def update_user(id):
     data = request.get_json()
     user.name = data.get('name', user.name)
     user.role = data.get('role', user.role)
+    
+    # Actualizar la contraseña solo si se proporciona una nueva
     if 'password' in data and data['password']:
         user.password_hash = generate_password_hash(data['password'], method='pbkdf2:sha256')
+        
     db.session.commit()
     return jsonify({'message': 'Usuario actualizado correctamente'})
 
@@ -137,7 +152,6 @@ def delete_user(id):
     return jsonify({'message': 'Usuario eliminado correctamente'})
 
 # --- Endpoints para la gestión de Roles del Bot ---
-
 @app.route('/api/bot_roles', methods=['GET'])
 def get_bot_roles():
     roles = BotRole.query.options(db.joinedload(BotRole.assignee)).all()
@@ -148,6 +162,7 @@ def get_bot_roles():
             'title': role.title,
             'knowledge_base': role.knowledge_base,
             'assignee_name': role.assignee.name if role.assignee else 'Sin Asignar',
+            'assignee_id': role.assignee_id,
             'status': role.status,
             'chats_received': role.chats_received,
             'chats_pending': role.chats_pending
@@ -163,16 +178,13 @@ def update_bot_role(id):
     role.status = data.get('status', role.status)
     
     assignee_id = data.get('assignee_id')
-    if assignee_id:
-        role.assignee_id = assignee_id
-    else:
-        role.assignee_id = None
+    # Permite desasignar un rol enviando un ID nulo
+    role.assignee_id = assignee_id if assignee_id else None
 
     db.session.commit()
     return jsonify({'message': 'Rol del bot actualizado correctamente'})
     
 # --- Endpoint para la Configuración del Bot ---
-
 @app.route('/api/bot_config', methods=['GET'])
 def get_bot_config():
     config = BotConfig.query.first()
@@ -198,6 +210,7 @@ def update_bot_config():
     db.session.commit()
     return jsonify({'message': 'Configuración del bot actualizada correctamente'})
 
+
 # --- COMANDO CLI PARA INICIALIZAR LA BASE DE DATOS ---
 @app.cli.command('init-db')
 def init_db_command():
@@ -210,6 +223,7 @@ def init_db_command():
         print("¡Tablas creadas con éxito!")
 
         print("Poblando la base de datos con usuarios y roles iniciales...")
+        # Creación de usuarios
         admin_user = User(
             username='Admin123',
             password_hash=generate_password_hash('12345', method='pbkdf2:sha256'),
@@ -224,17 +238,21 @@ def init_db_command():
         )
         db.session.add(admin_user)
         db.session.add(support_user)
-        db.session.commit()
+        db.session.commit() # Guardar usuarios para obtener sus IDs
         print("...usuarios creados.")
 
+        # Creación de roles de bot
         roles_iniciales = [
             BotRole(title='Soporte Técnico Nivel 1', knowledge_base='Guías de resolución de problemas comunes.', assignee_id=support_user.id, status='Activo', chats_received=1204, chats_pending=15),
-            BotRole(title='Agente de Ventas', knowledge_base='Catálogo de productos y promociones.', assignee_id=support_user.id, status='Activo', chats_received=856, chats_pending=5)
+            BotRole(title='Agente de Ventas', knowledge_base='Catálogo de productos y promociones.', assignee_id=support_user.id, status='Activo', chats_received=856, chats_pending=5),
+            BotRole(title='Gestión de Citas', knowledge_base='Acceso a calendarios y políticas.', status='Inactivo'),
+            BotRole(title='Recursos Humanos', knowledge_base='Políticas de la empresa y beneficios.', status='Activo')
         ]
         db.session.bulk_save_objects(roles_iniciales)
         db.session.commit()
         print("...roles de bot creados.")
 
+        # Creación de la configuración inicial del bot
         config_inicial = BotConfig(
             is_active=True,
             whatsapp_number='+57 3132217862',
@@ -246,7 +264,10 @@ def init_db_command():
 
         print("¡Población de la base de datos completada con éxito!")
 
+
 if __name__ == '__main__':
+    # Usar el puerto definido por OnRender, con un valor por defecto para desarrollo local
     port = int(os.environ.get('PORT', 5000))
+    # 'debug=False' es importante para producción
     app.run(host='0.0.0.0', port=port, debug=False)
 
