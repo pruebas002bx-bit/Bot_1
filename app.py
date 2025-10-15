@@ -9,25 +9,46 @@ load_dotenv()
 
 app = Flask(__name__, template_folder='templates')
 
-# --- INICIO DE LA CORRECCIÓN ---
-# Obtener la URL de la base de datos de las variables de entorno
+# --- CONFIGURACIÓN DE LA BASE DE DATOS ---
 db_uri = os.getenv('DATABASE_URL')
-
-# Reemplazar 'postgres://' con 'postgresql://' si es necesario
 if db_uri and db_uri.startswith("postgres://"):
     db_uri = db_uri.replace("postgres://", "postgresql://", 1)
 
 app.config['SQLALCHEMY_DATABASE_URI'] = db_uri
-# --- FIN DE LA CORRECCIÓN ---
-
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', 'una-clave-secreta-por-defecto')
 
 # Inicializar la extensión de SQLAlchemy
 db = SQLAlchemy(app)
 
-# Importar los modelos después de inicializar db para evitar importaciones circulares
-from models import User, BotRole, BotConfig
+# --- DEFINICIÓN DE LOS MODELOS DE LA BASE DE DATOS ---
+# Moviendo los modelos aquí se resuelve el error de importación circular
+
+class User(db.Model):
+    __tablename__ = 'users'
+    id = db.Column(db.Integer, primary_key=True)
+    username = db.Column(db.String(80), unique=True, nullable=False)
+    password_hash = db.Column(db.String(256), nullable=False)
+    name = db.Column(db.String(120), nullable=False)
+    role = db.Column(db.String(80), nullable=False) # 'Admin' o 'Soporte'
+
+class BotRole(db.Model):
+    __tablename__ = 'bot_roles'
+    id = db.Column(db.Integer, primary_key=True)
+    title = db.Column(db.String(120), nullable=False)
+    knowledge_base = db.Column(db.Text, nullable=True)
+    assignee_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
+    status = db.Column(db.String(20), default='Activo', nullable=False)
+    chats_received = db.Column(db.Integer, default=0)
+    chats_pending = db.Column(db.Integer, default=0)
+    assignee = db.relationship('User', backref='assigned_roles')
+
+class BotConfig(db.Model):
+    __tablename__ = 'bot_config'
+    id = db.Column(db.Integer, primary_key=True, default=1)
+    is_active = db.Column(db.Boolean, default=True, nullable=False)
+    whatsapp_number = db.Column(db.String(50), nullable=True)
+    welcome_message = db.Column(db.Text, nullable=True)
 
 # --- RUTAS DE LA APLICACIÓN ---
 
@@ -47,7 +68,6 @@ def menu_soporte():
 # Rutas para el contenido del iframe
 @app.route('/page/<path:page_name>')
 def show_page(page_name):
-    # Asegurarse de que solo se puedan cargar archivos .html
     if not page_name.endswith('.html'):
         return "Not Found", 404
     return render_template(page_name)
@@ -66,7 +86,6 @@ def login():
     user = User.query.filter_by(username=username).first()
 
     if user and check_password_hash(user.password_hash, password):
-        # En una app real, aquí se crearía una sesión de usuario
         redirect_url = 'menu_admin' if user.role == 'Admin' else 'menu_soporte'
         return jsonify({
             "success": True,
@@ -86,9 +105,11 @@ def get_users():
 @app.route('/api/users', methods=['POST'])
 def add_user():
     data = request.get_json()
+    # Añadido un nombre de usuario por defecto si no se proporciona
+    username = data.get('username') or data.get('name', '').replace(' ', '_').lower()
     hashed_password = generate_password_hash(data['password'], method='pbkdf2:sha256')
     new_user = User(
-        username=data['username'], 
+        username=username, 
         name=data['name'], 
         password_hash=hashed_password, 
         role=data['role']
@@ -119,15 +140,14 @@ def delete_user(id):
 
 @app.route('/api/bot_roles', methods=['GET'])
 def get_bot_roles():
-    # Unimos BotRole con User para obtener el nombre del asignado
-    roles = db.session.query(BotRole, User.name).outerjoin(User, BotRole.assignee_id == User.id).all()
+    roles = BotRole.query.options(db.joinedload(BotRole.assignee)).all()
     result = []
-    for role, assignee_name in roles:
+    for role in roles:
         result.append({
             'id': role.id,
             'title': role.title,
             'knowledge_base': role.knowledge_base,
-            'assignee_name': assignee_name or 'Sin Asignar',
+            'assignee_name': role.assignee.name if role.assignee else 'Sin Asignar',
             'status': role.status,
             'chats_received': role.chats_received,
             'chats_pending': role.chats_pending
@@ -142,12 +162,11 @@ def update_bot_role(id):
     role.knowledge_base = data.get('knowledge_base', role.knowledge_base)
     role.status = data.get('status', role.status)
     
-    # Manejar asignación por ID de usuario
     assignee_id = data.get('assignee_id')
     if assignee_id:
-        user = User.query.get(assignee_id)
-        if user:
-            role.assignee_id = assignee_id
+        role.assignee_id = assignee_id
+    else:
+        role.assignee_id = None
 
     db.session.commit()
     return jsonify({'message': 'Rol del bot actualizado correctamente'})
@@ -183,14 +202,14 @@ def update_bot_config():
 @app.cli.command('init-db')
 def init_db_command():
     """Crea las tablas de la base de datos y añade datos iniciales."""
-    print("Creando todas las tablas...")
-    db.create_all()
-    print("¡Tablas creadas con éxito!")
+    with app.app_context():
+        print("Borrando todas las tablas existentes...")
+        db.drop_all()
+        print("Creando todas las tablas...")
+        db.create_all()
+        print("¡Tablas creadas con éxito!")
 
-    # Verificar si ya existen usuarios para no duplicarlos
-    if User.query.count() == 0:
         print("Poblando la base de datos con usuarios y roles iniciales...")
-        # Crear usuarios iniciales
         admin_user = User(
             username='Admin123',
             password_hash=generate_password_hash('12345', method='pbkdf2:sha256'),
@@ -208,18 +227,14 @@ def init_db_command():
         db.session.commit()
         print("...usuarios creados.")
 
-        if BotRole.query.count() == 0:
-            # Crear roles de bot iniciales, ahora usando los IDs correctos
-            roles_iniciales = [
-                BotRole(title='Soporte Técnico Nivel 1', knowledge_base='Guías de resolución de problemas comunes.', assignee_id=support_user.id, status='Activo', chats_received=1204, chats_pending=15),
-                BotRole(title='Agente de Ventas', knowledge_base='Catálogo de productos y promociones.', assignee_id=support_user.id, status='Activo', chats_received=856, chats_pending=5)
-            ]
-            db.session.bulk_save_objects(roles_iniciales)
-            db.session.commit()
-            print("...roles de bot creados.")
+        roles_iniciales = [
+            BotRole(title='Soporte Técnico Nivel 1', knowledge_base='Guías de resolución de problemas comunes.', assignee_id=support_user.id, status='Activo', chats_received=1204, chats_pending=15),
+            BotRole(title='Agente de Ventas', knowledge_base='Catálogo de productos y promociones.', assignee_id=support_user.id, status='Activo', chats_received=856, chats_pending=5)
+        ]
+        db.session.bulk_save_objects(roles_iniciales)
+        db.session.commit()
+        print("...roles de bot creados.")
 
-    if BotConfig.query.count() == 0:
-        # Crear configuración inicial del bot
         config_inicial = BotConfig(
             is_active=True,
             whatsapp_number='+57 3132217862',
@@ -229,10 +244,9 @@ def init_db_command():
         db.session.commit()
         print("...configuración del bot creada.")
 
-    print("¡Población de la base de datos completada con éxito!")
+        print("¡Población de la base de datos completada con éxito!")
 
 if __name__ == '__main__':
-    # Usar el puerto que define Render, o 5000 si se corre localmente
     port = int(os.environ.get('PORT', 5000))
     app.run(host='0.0.0.0', port=port, debug=False)
 
