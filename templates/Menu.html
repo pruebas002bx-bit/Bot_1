@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Menú Principal</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            font-family: 'Inter', sans-serif;
+            height: 100vh;
+            background-color: #f8fafc;
+            display: flex;
+            overflow: hidden;
+        }
+        .sidebar {
+            width: 260px;
+            background: #ffffff;
+            border-right: 1px solid #e2e8f0;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+            display: flex;
+            flex-direction: column;
+            z-index: 10;
+        }
+        .sidebar-header {
+            padding: 20px;
+            margin-bottom: 30px;
+        }
+        .sidebar-header img {
+            width: 100%;
+            max-width: 200px;
+            height: auto;
+            display: block;
+            margin: 0 auto;
+        }
+        .nav-menu {
+            padding: 0 20px;
+            flex-grow: 1;
+        }
+        .nav-menu a, .sidebar-footer a {
+            display: flex;
+            align-items: center;
+            padding: 14px 20px;
+            color: #475569;
+            text-decoration: none;
+            border-radius: 10px;
+            margin-bottom: 8px;
+            font-size: 16px;
+            font-weight: 500;
+            transition: background 0.2s ease, color 0.2s ease;
+            position: relative;
+        }
+        .nav-menu a:hover, .sidebar-footer a:hover {
+            background: #f1f5f9;
+            color: #1e293b;
+        }
+        .nav-menu a.active {
+            background: #f1f5f9;
+            color: #1e293b;
+            font-weight: 600;
+        }
+        .nav-menu a.active::before {
+            content: '';
+            position: absolute;
+            left: 0;
+            top: 50%;
+            transform: translateY(-50%);
+            height: 60%;
+            width: 4px;
+            background-color: #3b82f6;
+            border-radius: 0 4px 4px 0;
+        }
+        .nav-menu a i, .sidebar-footer a i {
+            width: 24px;
+            text-align: center;
+            margin-right: 18px;
+            font-size: 18px;
+        }
+        .sidebar-footer {
+            padding: 20px;
+            border-top: 1px solid #e2e8f0;
+        }
+        .live-clock {
+            background: #f1f5f9;
+            color: #334155;
+            padding: 15px;
+            border-radius: 10px;
+            text-align: center;
+            margin-bottom: 15px;
+        }
+        .live-clock .time {
+            font-size: 22px;
+            font-weight: 600;
+            letter-spacing: 1px;
+            margin-bottom: 5px;
+        }
+        .live-clock .date {
+            font-size: 14px;
+            color: #64748b;
+        }
+        .sidebar-footer a {
+            margin-bottom: 0;
+        }
+        .main-content {
+            flex-grow: 1;
+            padding: 0;
+            overflow: hidden;
+            position: relative;
+        }
+        #content-frame {
+            width: 100%;
+            height: 100%;
+            border: none;
+        }
+    </style>
+</head>
+<body>
+
+    <aside class="sidebar">
+        <div class="sidebar-header">
+            <img src="https://i.ibb.co/sdjhJhJV/image-removebg-preview-21.png" alt="Logo de la Empresa">
+        </div>
+        <nav class="nav-menu">
+            <a href="#" class="nav-link active" data-page="Dashboard.html"><i class="fas fa-tachometer-alt"></i><span>Dashboard</span></a>
+            <a href="#" class="nav-link" data-page="Bot.html"><i class="fas fa-robot"></i><span>Bot</span></a>
+            <a href="#" class="nav-link" data-page="Usuarios.html"><i class="fas fa-users-cog"></i><span>Usuarios</span></a>
+            <a href="#" class="nav-link" data-page="Configuracion.html"><i class="fas fa-cog"></i><span>Configuración</span></a>
+        </nav>
+        <div class="sidebar-footer">
+            <div class="live-clock">
+                <div id="clock-time" class="time">--:--:--</div>
+                <div id="clock-date" class="date">----------</div>
+            </div>
+            <a href="Index.html" class="nav-link"><i class="fas fa-sign-out-alt"></i><span>Cerrar Sesión</span></a>
+        </div>
+    </aside>
+
+    <main class="main-content">
+        <iframe id="content-frame" src="Dashboard.html" name="content-frame">
+            Tu navegador no soporta iframes.
+        </iframe>
+    </main>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            const allLinks = document.querySelectorAll('.nav-link');
+            const navMenuLinks = document.querySelectorAll('.nav-menu .nav-link');
+            const clockTime = document.getElementById('clock-time');
+            const clockDate = document.getElementById('clock-date');
+            const contentFrame = document.getElementById('content-frame');
+
+            function updateClock() {
+                const now = new Date();
+                const hours = String(now.getHours()).padStart(2, '0');
+                const minutes = String(now.getMinutes()).padStart(2, '0');
+                const seconds = String(now.getSeconds()).padStart(2, '0');
+                
+                clockTime.textContent = `${hours}:${minutes}:${seconds}`;
+
+                const options = { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' };
+                // CORRECCIÓN: El método correcto es toLocaleDateString
+                clockDate.textContent = now.toLocaleDateString('es-ES', options);
+            }
+
+            updateClock();
+            setInterval(updateClock, 1000);
+
+            allLinks.forEach(link => {
+                link.addEventListener('click', function(e) {
+                    e.preventDefault();
+                    
+                    const page = this.getAttribute('data-page');
+                    const href = this.getAttribute('href');
+
+                    if (href === 'Index.html') {
+                        window.location.href = href;
+                        return;
+                    }
+                    
+                    if (page) {
+                        if (this.classList.contains('active')) return;
+                        
+                        contentFrame.src = page;
+                        
+                        navMenuLinks.forEach(l => l.classList.remove('active'));
+                        this.classList.add('active');
+                    }
+                });
+            });
+        });
+    </script>
+
+</body>
+</html>

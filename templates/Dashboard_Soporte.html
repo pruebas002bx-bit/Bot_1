@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <title>Dashboard de Soporte</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        :root {
+            /* --- INICIO DE LA MODIFICACIÓN: Paleta de Grises --- */
+            --card-bg: rgba(255, 255, 255, 0.85);
+            --text-primary: #111827;
+            --text-secondary: #4B5563;
+            --border-color: rgba(255, 255, 255, 0.5);
+            --shadow-color: rgba(0, 0, 0, 0.1);
+            --accent-color: #2D3748; /* Gris Carbón Oscuro */
+            --accent-hover: #4A5568;
+            --icon-box-bg: #9CA3AF; /* Gris neutro para las cajas de íconos */
+            /* --- FIN DE LA MODIFICACIÓN --- */
+        }
+        body {
+            background-image: url('https://i.postimg.cc/pLqCVDFx/Chat-GPT-Image-19-sept-2025-18-11-46.png');
+            background-size: cover;
+            background-position: center;
+            background-attachment: fixed;
+            padding: 40px;
+            font-family: 'Inter', sans-serif;
+        }
+        .dashboard-container {
+            animation: fadeIn 0.8s ease-out;
+            color: var(--text-primary);
+        }
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(20px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        .dashboard-header h1 {
+            font-size: 32px;
+            font-weight: 700;
+            margin-bottom: 8px;
+        }
+        .dashboard-header p {
+            font-size: 16px;
+            color: var(--text-secondary);
+            margin-bottom: 30px;
+        }
+        .dashboard-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 25px;
+        }
+        .stat-card, .chart-card {
+            background: var(--card-bg);
+            backdrop-filter: blur(15px) saturate(180%);
+            border-radius: 20px;
+            border: 1px solid var(--border-color);
+            box-shadow: 0 8px 32px 0 var(--shadow-color);
+            padding: 25px;
+        }
+        .stat-card {
+            display: flex;
+            align-items: center;
+        }
+        .stat-card .icon {
+            font-size: 22px;
+            min-width: 50px;
+            height: 50px;
+            border-radius: 12px;
+            margin-right: 20px;
+            display: grid;
+            place-items: center;
+            color: #ffffff;
+            background: var(--icon-box-bg);
+        }
+        .stat-card .info h3 {
+            font-size: 14px;
+            color: var(--text-secondary);
+            font-weight: 500;
+            text-transform: uppercase;
+        }
+        .stat-card .info p {
+            font-size: 28px;
+            font-weight: 600;
+        }
+        .chart-card h2 {
+            font-size: 18px;
+            font-weight: 600;
+            margin-bottom: 20px;
+        }
+        .chart-wrapper {
+            position: relative;
+            height: 350px;
+        }
+        .line-chart-container { grid-column: 1 / 3; }
+        .bar-chart-container { grid-column: 3 / 4; }
+    </style>
+</head>
+<body>
+
+    <div class="dashboard-container">
+        <div class="dashboard-header">
+            <h1>Dashboard de Soporte Técnico Nivel 1</h1>
+            <p>Rendimiento y volumen de mensajes gestionados.</p>
+        </div>
+
+        <div class="dashboard-grid">
+            <div class="stat-card">
+                <div class="icon"><i class="fas fa-calendar-day"></i></div>
+                <div class="info"><h3>Mensajes Hoy</h3><p>87</p></div>
+            </div>
+            <div class="stat-card">
+                <div class="icon"><i class="fas fa-calendar-week"></i></div>
+                <div class="info"><h3>Mensajes (Semana)</h3><p>562</p></div>
+            </div>
+            <div class="stat-card">
+                <div class="icon"><i class="fas fa-calendar-alt"></i></div>
+                <div class="info"><h3>Mensajes (Mes)</h3><p>2,315</p></div>
+            </div>
+
+            <div class="chart-card line-chart-container">
+                <h2>Volumen de Mensajes (Últimos 7 Días)</h2>
+                <div class="chart-wrapper"><canvas id="chatsPerDayChart"></canvas></div>
+            </div>
+            <div class="chart-card bar-chart-container">
+                <h2>Motivos de Consulta</h2>
+                <div class="chart-wrapper"><canvas id="chatsByTopicChart"></canvas></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            Chart.defaults.font.family = "'Inter', sans-serif";
+            Chart.defaults.color = '#4B5563';
+
+            // --- GRÁFICO DE LÍNEAS CON COLORES GRISES ---
+            const ctxLine = document.getElementById('chatsPerDayChart').getContext('2d');
+            const gradient = ctxLine.createLinearGradient(0, 0, 0, 350);
+            gradient.addColorStop(0, 'rgba(74, 85, 104, 0.3)'); // Gris oscuro
+            gradient.addColorStop(1, 'rgba(74, 85, 104, 0)');
+            new Chart(ctxLine, {
+                type: 'line',
+                data: {
+                    labels: ['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom'],
+                    datasets: [{
+                        label: 'Mensajes Recibidos', data: [65, 59, 80, 87, 76, 85, 90],
+                        fill: true, backgroundColor: gradient, borderColor: '#2D3748',
+                        tension: 0.4, pointBackgroundColor: '#2D3748'
+                    }]
+                },
+                options: { responsive: true, maintainAspectRatio: false, scales: { y: { beginAtZero: true } }, plugins: { legend: { display: false } } }
+            });
+
+            // --- GRÁFICO DE BARRAS CON COLORES GRISES ---
+            const ctxBar = document.getElementById('chatsByTopicChart').getContext('2d');
+            new Chart(ctxBar, {
+                type: 'bar',
+                data: {
+                    labels: ['Contraseña', 'Conexión', 'Factura', 'Uso App', 'Otro'],
+                    datasets: [{
+                        label: 'Número de Consultas', data: [120, 90, 65, 150, 45],
+                        backgroundColor: ['#2D3748', '#4A5568', '#718096', '#A0AEC0', '#CBD5E0'],
+                        borderRadius: 6
+                    }]
+                },
+                options: { responsive: true, maintainAspectRatio: false, indexAxis: 'y', scales: { x: { beginAtZero: true } }, plugins: { legend: { display: false } } }
+            });
+        });
+    </script>
+</body>
+</html>

@@ -1,0 +1,332 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Chats Generales</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        :root {
+            --left-panel-bg: #f0f2f5;
+            --right-panel-header-bg: #e9edef;
+            --chat-bg-image: url('https://user-images.githubusercontent.com/15075759/28719144-86dc0f70-73b1-11e7-911d-60d70fcded21.png');
+            --text-primary: #111827;
+            --text-secondary: #6b7280;
+            --border-color: #d1d8de;
+            --accent-color: #00a884;
+            --sent-bubble-bg: #d9fdd3;
+            --received-bubble-bg: #ffffff;
+            --danger-color: #ef4444;
+            --success-color: #16a34a;
+            --avatar-colors: #b91c1c, #b45309, #a16207, #4d7c0f, #15803d, #0f766e, #1d4ed8, #6d28d9, #be185d;
+        }
+        * { box-sizing: border-box; }
+        html, body { height: 100%; width: 100%; margin: 0; padding: 0; overflow: hidden; font-family: 'Inter', sans-serif; background-color: #f0f2f5; }
+        .chat-container { width: 100vw; height: 100vh; display: flex; }
+        /* --- Panel Izquierdo --- */
+        .chat-list-panel { width: 30%; min-width: 350px; max-width: 450px; background: #ffffff; border-right: 1px solid var(--border-color); display: flex; flex-direction: column; }
+        .chat-list-header { padding: 10px 16px; background: var(--right-panel-header-bg); flex-shrink: 0; }
+        .chat-search input { width: 100%; padding: 10px 15px; border-radius: 8px; border: none; background-color: #ffffff; }
+        .chat-items { overflow-y: auto; flex-grow: 1; }
+        .chat-item { display: flex; align-items: center; padding: 12px 16px; cursor: pointer; transition: background-color 0.2s; border-bottom: 1px solid #f0f2f5; position: relative; }
+        .chat-item:hover { background-color: #f5f6f6; }
+        .chat-item.active { background-color: #e9edef; }
+        .avatar { width: 50px; height: 50px; border-radius: 50%; margin-right: 15px; display: flex; align-items: center; justify-content: center; color: white; font-weight: 600; font-size: 1.2em; flex-shrink: 0; }
+        .chat-info { flex-grow: 1; overflow: hidden; }
+        .chat-info .name { font-weight: 500; color: var(--text-primary); }
+        .chat-info .last-message { font-size: 0.9em; color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .chat-meta { display: flex; flex-direction: column; align-items: flex-end; flex-shrink: 0; margin-left: 10px; }
+        .chat-time { font-size: 0.8em; color: var(--text-secondary); }
+        .unread-badge { background-color: var(--danger-color); color: white; font-size: 0.75em; font-weight: 600; border-radius: 50%; width: 22px; height: 22px; display: flex; align-items: center; justify-content: center; margin-top: 5px; }
+        .chat-tabs { display: flex; border-bottom: 2px solid #e2e8f0; margin-top: 10px; }
+        .tab-btn { flex: 1; padding: 12px; background: none; border: none; cursor: pointer; font-weight: 600; color: var(--text-secondary); border-bottom: 3px solid transparent; transition: all 0.2s; }
+        .tab-btn.active { color: var(--accent-color); border-bottom-color: var(--accent-color); }
+
+        /* --- Panel Derecho --- */
+        .chat-window-panel { width: 70%; display: flex; flex-direction: column; }
+        .chat-window-header { padding: 10px 20px; background: var(--right-panel-header-bg); border-bottom: 1px solid var(--border-color); display: flex; justify-content: space-between; align-items: center; }
+        .contact-info { display: flex; align-items: center; }
+        .contact-info .avatar { width: 40px; height: 40px; font-size: 1em; }
+        .contact-details { display: flex; flex-direction: column; }
+        .contact-details .name { font-weight: 500; }
+        .contact-details .phone { font-size: 0.85em; color: var(--text-secondary); }
+        .header-actions { position: relative; }
+        .actions-menu-btn { background: none; border: none; color: var(--text-secondary); font-size: 1.4em; padding: 5px 10px; cursor: pointer; border-radius: 50%; }
+        .actions-menu-btn:hover { background-color: #d1d8de; }
+        .actions-dropdown { display: none; position: absolute; background-color: white; min-width: 250px; box-shadow: 0px 8px 16px 0px rgba(0,0,0,0.15); z-index: 10; right: 0; top: 40px; border-radius: 8px; overflow: hidden; border: 1px solid #e2e8f0; }
+        .actions-dropdown.show { display: block; }
+        .actions-dropdown a { color: var(--text-primary); padding: 12px 16px; text-decoration: none; display: flex; align-items: center; font-size: 0.9em; }
+        .actions-dropdown a:hover { background-color: #f1f1f1; }
+        .actions-dropdown a i { width: 30px; text-align: center; color: var(--text-secondary); }
+        .actions-dropdown a.danger-action { color: var(--danger-color); }
+        .message-area { flex-grow: 1; padding: 20px 8%; overflow-y: auto; display: flex; flex-direction: column; background-image: var(--chat-bg-image); }
+        .message-bubble { max-width: 60%; padding: 8px 12px; border-radius: 8px; margin-bottom: 5px; line-height: 1.4; box-shadow: 0 1px 1px rgba(0,0,0,0.05); }
+        .sent { background-color: var(--sent-bubble-bg); align-self: flex-end; }
+        .received { background-color: var(--received-bubble-bg); align-self: flex-start; }
+        .message-input-area { padding: 10px 20px; background: var(--right-panel-header-bg); display: flex; align-items: center; }
+        .message-input-area input { flex-grow: 1; padding: 12px 20px; border: none; border-radius: 24px; margin: 0 10px; }
+        .message-input-area button { background: var(--accent-color); color: white; border: none; width: 48px; height: 48px; border-radius: 50%; font-size: 1.2em; cursor: pointer; transition: opacity 0.2s; }
+        .message-input-area button:hover { opacity: 0.9; }
+        .empty-chat-window { flex-grow: 1; display: flex; justify-content: center; align-items: center; text-align: center; color: var(--text-secondary); background: var(--right-panel-header-bg); }
+        
+        /* --- Ventana Modal --- */
+        .modal-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0, 0, 0, 0.6); backdrop-filter: blur(5px); display: none; align-items: center; justify-content: center; z-index: 1000; opacity: 0; transition: opacity 0.3s ease; }
+        .modal-overlay.show { display: flex; opacity: 1; }
+        .modal-content { background: white; padding: 30px; border-radius: 16px; width: 90%; max-width: 450px; text-align: center; box-shadow: 0 5px 25px rgba(0,0,0,0.2); transform: scale(0.9); transition: transform 0.3s ease; }
+        .modal-overlay.show .modal-content { transform: scale(1); }
+        .modal-content h2 { margin-top: 0; margin-bottom: 15px; color: var(--text-primary); }
+        .modal-content p { margin-bottom: 25px; color: var(--text-secondary); line-height: 1.6; }
+        .modal-form-group { text-align: left; margin-bottom: 25px; }
+        .modal-form-group label { display: block; font-weight: 500; margin-bottom: 8px; color: var(--text-secondary); }
+        .modal-form-group select { width: 100%; padding: 12px; border: 1px solid #ccc; border-radius: 8px; font-size: 1em; }
+        .modal-actions { display: flex; justify-content: center; gap: 15px; }
+        .modal-actions button { padding: 12px 25px; border: none; border-radius: 8px; font-weight: 600; cursor: pointer; transition: background-color 0.2s; min-width: 130px; }
+        .btn-cancel { background-color: #e5e7eb; color: var(--text-secondary); }
+        .btn-cancel:hover { background-color: #d1d5db; }
+        .btn-confirm { color: white; }
+        .btn-confirm.primary { background-color: var(--accent-color); }
+        .btn-confirm.primary:hover { opacity: 0.9; }
+        .success-icon { font-size: 4em; color: var(--success-color); margin-bottom: 20px; }
+    </style>
+</head>
+<body>
+    <div class="chat-container">
+        <aside class="chat-list-panel">
+            <header class="chat-list-header">
+                <div class="chat-search"><input type="text" placeholder="Buscar o empezar un chat nuevo"></div>
+                <div class="chat-tabs">
+                    <button class="tab-btn active" data-view="active">Activos</button>
+                    <button class="tab-btn" data-view="archived">Almacenados</button>
+                </div>
+            </header>
+            <div class="chat-items" id="chat-list"></div>
+        </aside>
+        <main class="chat-window-panel" id="chat-window"></main>
+    </div>
+    <div class="modal-overlay" id="transfer-modal">
+        <div class="modal-content">
+            <h2>Trasladar Chat</h2>
+            <p>Selecciona el rol al que deseas transferir esta conversación.</p>
+            <div class="modal-form-group">
+                <label for="transfer-role-select">Transferir a:</label>
+                <select id="transfer-role-select"></select>
+            </div>
+            <div class="modal-actions">
+                <button class="btn-cancel" id="transfer-modal-cancel-btn">Cancelar</button>
+                <button class="btn-confirm primary" id="transfer-modal-confirm-btn">Trasladar</button>
+            </div>
+        </div>
+    </div>
+    <div class="modal-overlay" id="success-modal">
+        <div class="modal-content">
+            <div class="success-icon"><i class="fas fa-check-circle"></i></div>
+            <h2>Éxito</h2>
+            <p id="success-modal-message"></p>
+            <div class="modal-actions">
+                <button class="btn-confirm primary" id="success-modal-ok-btn">Aceptar</button>
+            </div>
+        </div>
+    </div>
+
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+    let activeChatId = null;
+    let currentView = 'active';
+    
+    // --- INICIO DE MODIFICACIÓN: Se elimina la propiedad 'botActive' ---
+    let chats = [
+        { id: 1, name: "Mariana Torres", phone: "+57 310 123 4567", time: "10:45 AM", unread: 2, messages: [{ sender: 'contact', text: 'Hola, tengo una consulta sobre el estado de mi pedido.' },{ sender: 'me', text: '¡Hola, Mariana! Claro, permíteme un momento para verificarlo. ¿Me podrías confirmar tu número de pedido?' },{ sender: 'contact', text: 'Sí, es el #8B3D4F.' },{ sender: 'me', text: 'Gracias. Veo que tu pedido ya fue enviado y está programado para entrega mañana.' },{ sender: 'contact', text: 'Perfecto, muchas gracias por tu ayuda!' }] },
+        { id: 2, name: "Ricardo Vargas", phone: "+57 300 987 6543", time: "Ayer", unread: 0, messages: [{ sender: 'contact', text: 'Buenas tardes. Tengo un problema con mi factura de este mes.' },{ sender: 'me', text: 'Buenas tardes, Ricardo. Entiendo. Permíteme revisar tu cuenta.' },{ sender: 'contact', text: 'Claro, es el 458-2210.' },{ sender: 'me', text: 'Un momento por favor... Ya lo he corregido.' }] },
+        { id: 3, name: "Juan David", phone: "+57 315 555 1212", time: "Ayer", unread: 15, messages: [{ sender: 'contact', text: 'Hola! Necesito soporte técnico, mi internet no funciona.' },{ sender: 'me', text: 'Hola Juan, lamento escuchar eso. ¿Ya intentaste reiniciar el módem?' },{ sender: 'contact', text: 'Sí, ya lo hice varias veces y nada.' },{ sender: 'me', text: 'Entendido. He agendado una visita técnica para mañana.' }] }
+    ];
+    let archivedChats = [
+        { id: 4, name: "Sofia Castro", phone: "+57 321 888 9090", time: "Martes", unread: 0, messages: [{ sender: 'contact', text: 'Hola, me gustaría saber qué planes tienen.' },{ sender: 'me', text: '¡Hola Sofía! Con gusto te ayudo.' }] }
+    ];
+    // --- FIN DE MODIFICACIÓN ---
+    const transferRoles = [ "Agente de Ventas", "Facturación", "Soporte Técnico N2", "Recursos Humanos" ];
+    
+    const chatListEl = document.getElementById('chat-list');
+    const chatWindowEl = document.getElementById('chat-window');
+    const transferModalEl = document.getElementById('transfer-modal');
+    const transferModalConfirmBtn = document.getElementById('transfer-modal-confirm-btn');
+    const transferModalCancelBtn = document.getElementById('transfer-modal-cancel-btn');
+    const roleSelectEl = document.getElementById('transfer-role-select');
+    const successModalEl = document.getElementById('success-modal');
+    const successModalOkBtn = document.getElementById('success-modal-ok-btn');
+    const tabs = document.querySelectorAll('.tab-btn');
+    const avatarColors = ['#b91c1c', '#b45309', '#a16207', '#4d7c0f', '#15803d', '#0f766e', '#1d4ed8', '#6d28d9', '#be185d'];
+
+    // --- MANEJO DE MODALES ---
+    const openTransferModal = () => {
+        roleSelectEl.innerHTML = '';
+        transferRoles.forEach(role => {
+            const option = document.createElement('option');
+            option.value = role;
+            option.textContent = role;
+            roleSelectEl.appendChild(option);
+        });
+        transferModalEl.classList.add('show');
+    };
+    const closeTransferModal = () => transferModalEl.classList.remove('show');
+
+    const openSuccessModal = (message) => {
+        document.getElementById('success-modal-message').textContent = message;
+        successModalEl.classList.add('show');
+    };
+    const closeSuccessModal = () => successModalEl.classList.remove('show');
+
+    transferModalConfirmBtn.addEventListener('click', () => {
+        const selectedRole = roleSelectEl.value;
+        closeTransferModal();
+        closeAndRemoveActiveChat();
+        openSuccessModal(`El chat ha sido transferido exitosamente a ${selectedRole}.`);
+    });
+    transferModalCancelBtn.addEventListener('click', closeTransferModal);
+    successModalOkBtn.addEventListener('click', closeSuccessModal);
+
+    // --- FUNCIONES DE RENDERIZADO ---
+    const getAvatarDetails = (name, id) => {
+        const initials = name.split(' ').map(n => n[0]).join('').substring(0, 2).toUpperCase();
+        const color = avatarColors[id % avatarColors.length];
+        return { initials, color };
+    };
+
+    const renderChatList = () => {
+        const data = currentView === 'active' ? chats : archivedChats;
+        chatListEl.innerHTML = '';
+        data.forEach(chat => {
+            const { initials, color } = getAvatarDetails(chat.name, chat.id);
+            const lastMessage = chat.messages.length > 0 ? chat.messages[chat.messages.length - 1].text : "No hay mensajes";
+            const unreadBadge = chat.unread > 0 && currentView === 'active' ? `<div class="unread-badge">${chat.unread}</div>` : '';
+            const chatItem = document.createElement('div');
+            chatItem.className = `chat-item ${chat.id === activeChatId ? 'active' : ''}`;
+            chatItem.dataset.chatId = chat.id;
+            chatItem.innerHTML = `<div class="avatar" style="background-color: ${color};">${initials}</div> <div class="chat-info"> <div class="name">${chat.name}</div> <div class="last-message">${lastMessage}</div> </div> <div class="chat-meta"> <div class="chat-time">${chat.time}</div> ${unreadBadge} </div>`;
+            chatListEl.appendChild(chatItem);
+        });
+    };
+    
+    const renderEmptyState = () => chatWindowEl.innerHTML = `<div class="empty-chat-window"><div><i class="fas fa-comments" style="font-size: 5em; color: #dfe3e6;"></i><h2 style="margin-top: 20px;">Selecciona un chat para empezar</h2></div></div>`;
+
+    const renderChatWindow = (chatId) => {
+        const dataSet = currentView === 'active' ? chats : archivedChats;
+        const chat = dataSet.find(c => c.id === chatId);
+        if (!chat) { renderEmptyState(); return; }
+        
+        const { initials, color } = getAvatarDetails(chat.name, chat.id);
+        const messagesHtml = chat.messages.map(msg => `<div class="message-bubble ${msg.sender === 'me' ? 'sent' : 'received'}">${msg.text}</div>`).join('');
+        
+        // --- INICIO DE MODIFICACIÓN: Se elimina el menú de activar/desactivar bot ---
+        chatWindowEl.innerHTML = `
+            <header class="chat-window-header">
+                <div class="contact-info">
+                    <div class="avatar" style="background-color: ${color};">${initials}</div>
+                    <div class="contact-details"> <div class="name">${chat.name}</div> <div class="phone">${chat.phone}</div> </div>
+                </div>
+                <div class="header-actions">
+                    <button class="actions-menu-btn" id="actions-menu-btn"><i class="fas fa-ellipsis-v"></i></button>
+                    <div class="actions-dropdown" id="actions-dropdown">
+                        <a href="#" data-action="archive"><i class="fas fa-archive"></i> Solicitud Terminada</a>
+                        <a href="#" data-action="transfer" class="danger-action"><i class="fas fa-random"></i> Trasladar Chat</a>
+                    </div>
+                </div>
+            </header>
+            <div class="message-area" id="message-area">${messagesHtml}</div>
+            <footer class="message-input-area">
+                <form id="message-form" style="display: contents;">
+                    <input type="text" id="message-input" placeholder="Escribe un mensaje aquí..." autocomplete="off">
+                    <button type="submit"><i class="fas fa-paper-plane"></i></button>
+                </form>
+            </footer>`;
+        // --- FIN DE MODIFICACIÓN ---
+        const messageArea = document.getElementById('message-area');
+        if (messageArea) messageArea.scrollTop = messageArea.scrollHeight;
+    };
+    
+    const closeAndRemoveActiveChat = () => {
+        if (activeChatId === null) return;
+        chats = chats.filter(chat => chat.id !== activeChatId);
+        activeChatId = null;
+        renderChatList();
+        renderEmptyState();
+    };
+    
+    const archiveActiveChat = () => {
+        if (activeChatId === null || currentView !== 'active') return;
+        const chatIndex = chats.findIndex(c => c.id === activeChatId);
+        if (chatIndex > -1) {
+            const [archivedChat] = chats.splice(chatIndex, 1);
+            archivedChats.unshift(archivedChat);
+            activeChatId = null;
+            renderChatList();
+            renderEmptyState();
+        }
+    };
+
+    // --- EVENT LISTENERS ---
+    tabs.forEach(tab => {
+        tab.addEventListener('click', () => {
+            currentView = tab.dataset.view;
+            tabs.forEach(t => t.classList.remove('active'));
+            tab.classList.add('active');
+            activeChatId = null;
+            renderChatList();
+            renderEmptyState();
+        });
+    });
+
+    chatListEl.addEventListener('click', (e) => {
+        const chatItem = e.target.closest('.chat-item');
+        if (chatItem) {
+            activeChatId = parseInt(chatItem.dataset.chatId);
+            const dataSet = currentView === 'active' ? chats : archivedChats;
+            const selectedChat = dataSet.find(c => c.id === activeChatId);
+            if(selectedChat) selectedChat.unread = 0;
+            renderChatList();
+            renderChatWindow(activeChatId);
+        }
+    });
+
+    chatWindowEl.addEventListener('click', (e) => {
+        const menuBtn = e.target.closest('#actions-menu-btn');
+        const dropdown = document.getElementById('actions-dropdown');
+        if (menuBtn && dropdown) dropdown.classList.toggle('show');
+        
+        const actionLink = e.target.closest('a[data-action]');
+        if (actionLink) {
+            e.preventDefault();
+            const action = actionLink.dataset.action;
+            // --- INICIO DE MODIFICACIÓN: Se elimina el listener para 'toggle-bot' ---
+            if (action === 'archive') archiveActiveChat();
+            if (action === 'transfer') openTransferModal();
+            // --- FIN DE MODIFICACIÓN ---
+            if (dropdown) dropdown.classList.remove('show');
+        } else if (!e.target.closest('.header-actions')) {
+            if (dropdown) dropdown.classList.remove('show');
+        }
+    });
+
+    chatWindowEl.addEventListener('submit', (e) => {
+        if (e.target.id === 'message-form') {
+            e.preventDefault();
+            const input = document.getElementById('message-input');
+            const messageText = input.value.trim();
+            if (messageText && activeChatId !== null) {
+                const dataSet = currentView === 'active' ? chats : archivedChats;
+                const chat = dataSet.find(c => c.id === activeChatId);
+                if (chat) {
+                    chat.messages.push({ sender: 'me', text: messageText });
+                    input.value = '';
+                    renderChatWindow(activeChatId);
+                    renderChatList();
+                }
+            }
+        }
+    });
+
+    renderChatList();
+    renderEmptyState();
+});
+</script>
+</body>
+</html>

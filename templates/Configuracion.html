@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <title>Panel de Configuración del Bot</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css" integrity="sha512-SnH5WK+bZxgPHs44uWIX+LLJAJ9/2PkPKZ5QiAj6Ta86w+fsb2TkcmfRyVX3pBnMFcV7oQPJkl9QevSCWr3W6A==" crossorigin="anonymous" referrerpolicy="no-referrer" />
+    <style>
+        :root {
+            --card-bg: rgba(255, 255, 255, 0.9);
+            --card-bg-solid: #ffffff;
+            --text-primary: #111827;
+            --text-secondary: #4B5563;
+            --border-color: rgba(255, 255, 255, 0.4);
+            --shadow-color: rgba(0, 0, 0, 0.1);
+            --accent-color: #2D3748;
+            --accent-hover: #4A5568;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Inter', sans-serif;
+            /* CORRECCIÓN: Fondo de imagen aplicado */
+            background: url('https://i.postimg.cc/pLqCVDFx/Chat-GPT-Image-19-sept-2025-18-11-46.png') no-repeat center center/cover;
+            background-attachment: fixed;
+            min-height: 100vh;
+        }
+
+        .config-page {
+            display: flex;
+            justify-content: center;
+            align-items: flex-start;
+            padding: 40px;
+            animation: fadeIn 0.8s ease-out;
+        }
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+        
+        .config-content {
+            width: 100%;
+            max-width: 800px;
+        }
+
+        .content-header h1 { 
+            font-size: 2.8em; 
+            font-weight: 800; 
+            color: var(--text-primary); 
+            margin-bottom: 8px; 
+            text-shadow: 0 2px 10px rgba(255,255,255,0.7); /* Sombra para resaltar sobre el fondo */
+        }
+        .content-header p { 
+            font-size: 1.15em; 
+            color: var(--text-secondary); 
+            margin-bottom: 30px; 
+            text-shadow: 0 1px 5px rgba(255,255,255,0.5);
+        }
+
+        .config-card {
+            /* CORRECCIÓN: Estilo de cristal esmerilado */
+            background: var(--card-bg); 
+            backdrop-filter: blur(15px); 
+            -webkit-backdrop-filter: blur(15px);
+            border-radius: 20px; 
+            border: 1px solid var(--border-color); 
+            box-shadow: 0 8px 32px 0 var(--shadow-color);
+            padding: 30px; 
+            margin-bottom: 25px;
+        }
+        
+        .card-header { 
+            display: flex; 
+            justify-content: space-between; 
+            align-items: center; 
+            margin-bottom: 25px; 
+            border-bottom: 1px solid rgba(0,0,0,0.1);
+            padding-bottom: 20px;
+        }
+        .card-header h3 { font-size: 1.4em; font-weight: 700; color: var(--text-primary); }
+        
+        .btn-edit {
+            background: #e2e8f0; 
+            color: var(--text-secondary); 
+            border: none; 
+            border-radius: 10px;
+            padding: 10px 20px; 
+            font-weight: 600; 
+            cursor: pointer; 
+            transition: all 0.2s;
+        }
+        .btn-edit:hover { background: #cbd5e1; color: var(--text-primary); transform: translateY(-2px); }
+
+        .config-item { display: flex; align-items: flex-start; margin-bottom: 20px; }
+        .config-item .label { font-size: 1em; font-weight: 500; color: var(--text-secondary); width: 200px; flex-shrink: 0; padding-top: 5px; }
+        .config-item .value { font-size: 1em; font-weight: 600; color: var(--text-primary); flex-grow: 1; }
+
+        .bot-status-toggle { display: flex; align-items: center; gap: 15px; }
+        #botStatusDisplay { padding: 6px 14px; border-radius: 20px; font-weight: 600; font-size: 1em; }
+        #botStatusDisplay.active { background-color: #d1fae5; color: #065f46; }
+        #botStatusDisplay.inactive { background-color: #fee2e2; color: #991b1b; }
+
+        .whatsapp-preview { background-color: #E7F0E4; padding: 20px; border-radius: 12px; background-image: url('data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAJYAAADJCAMAAAD6H52ZAAAAA1BMVEX/2wf82b5oAAAAR0lEQVR4nO3BMQEAAADCoPVPbQ0PoAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD+Bs2RAAE2lC1SAAAAAElFTkSuQmCC');}
+        .whatsapp-message { 
+            background-color: #ffffff; 
+            padding: 10px 15px; 
+            border-radius: 8px; 
+            max-width: 80%; 
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1); 
+            word-wrap: break-word; 
+        }
+        
+        /* --- Estilos Mejorados de la Ventana Modal --- */
+        .modal-overlay {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0, 0, 0, 0.6);
+            backdrop-filter: blur(8px); display: none; align-items: center; justify-content: center; z-index: 1000; 
+            opacity: 0; transition: opacity 0.3s ease;
+        }
+        .modal-overlay.show { display: flex; opacity: 1; }
+        .modal-content {
+            background: linear-gradient(135deg, rgba(255,255,255,0.95), rgba(255,255,255,0.9)); 
+            border-radius: 16px; padding: 30px; width: 90%; max-width: 500px;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.2); transform: scale(0.95); transition: transform 0.3s ease;
+            border: 1px solid rgba(255, 255, 255, 0.5);
+        }
+        .modal-overlay.show .modal-content { transform: scale(1); }
+        .modal-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 25px; }
+        .modal-header h2 { font-size: 22px; }
+        .close-button { background: none; border: none; font-size: 24px; cursor: pointer; color: var(--text-secondary); }
+        
+        .modal-body .input-group {
+            background: rgba(249, 250, 251, 0.8); padding: 15px; border-radius: 12px;
+            margin-bottom: 15px; border: 1px solid #e5e7eb;
+        }
+        .modal-body .input-group .group-header { display: flex; align-items: center; margin-bottom: 10px; }
+        .modal-body .group-header i { color: var(--text-secondary); width: 20px; text-align: center; margin-right: 10px; }
+        .modal-body label { font-weight: 600; color: var(--text-primary); }
+        
+        .modal-body input, .modal-body textarea {
+            width: 100%; padding: 10px; font-size: 16px; border: 1px solid #d1d5db;
+            border-radius: 8px; transition: all 0.2s; background: rgba(255,255,255,0.7);
+        }
+        .modal-body textarea { resize: vertical; min-height: 120px; }
+        .modal-body input:focus, .modal-body textarea:focus { outline: none; border-color: var(--accent-color); background: #fff; }
+
+        .switch { position: relative; display: inline-block; width: 50px; height: 28px; }
+        .switch input { opacity: 0; width: 0; height: 0; }
+        .slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: #ccc; transition: .4s; border-radius: 28px; }
+        .slider:before { position: absolute; content: ""; height: 20px; width: 20px; left: 4px; bottom: 4px; background-color: white; transition: .4s; border-radius: 50%; }
+        input:checked + .slider { background-color: #10b981; }
+        input:checked + .slider:before { transform: translateX(22px); }
+
+        .modal-footer { display: flex; justify-content: flex-end; gap: 10px; margin-top: 30px; }
+        .btn { padding: 12px 25px; font-size: 16px; font-weight: 600; border: none; border-radius: 12px; cursor: pointer; transition: all 0.2s; }
+        .btn-secondary { background: #f1f5f9; color: var(--text-secondary); }
+        .btn-primary { background: var(--accent-color); color: white; }
+        
+        .toast { position: fixed; bottom: -100px; left: 50%; transform: translateX(-50%); background-color: var(--accent-color); color: white; padding: 15px 25px; border-radius: 12px; box-shadow: 0 5px 15px rgba(0,0,0,0.2); font-weight: 500; z-index: 2000; transition: bottom 0.5s ease; }
+        .toast.show { bottom: 30px; }
+    </style>
+</head>
+<body>
+    <div class="config-page">
+        <main class="config-content">
+            <div class="content-header">
+                <h1>Bot de WhatsApp</h1>
+                <p>Gestiona la configuración y el comportamiento de tu asistente virtual.</p>
+            </div>
+            <div class="config-card">
+                <div class="card-header">
+                    <h3>Configuración Principal</h3>
+                    <button class="btn-edit">Editar</button>
+                </div>
+                <div class="config-item">
+                    <div class="label">Estado del Bot</div>
+                    <div class="value bot-status-toggle">
+                        <span id="botStatusDisplay" class="active">Activo</span>
+                    </div>
+                </div>
+                <div class="config-item">
+                    <div class="label">Número Asignado</div>
+                    <div id="displayWhatsappNumber" class="value">+57 3132217862</div>
+                </div>
+                <div class="config-item">
+                    <div class="label">Saludo Inicial</div>
+                    <div class="value">
+                        <div class="whatsapp-preview">
+                            <div id="displayWelcomeMessage" class="whatsapp-message">¡Hola! Bienvenido a nuestro servicio de atención. ¿En qué puedo ayudarte hoy?</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <div class="modal-overlay" id="modalOverlay">
+        <div class="modal-content"><form id="modalForm">
+            <div class="modal-header">
+                <h2>Configuración del Bot</h2><button type="button" class="close-button">&times;</button>
+            </div>
+            <div class="modal-body" id="modalBody">
+                <div class="input-group">
+                    <div class="group-header">
+                        <i class="fas fa-power-off"></i><label>Estado del Bot</label>
+                    </div>
+                    <label class="switch">
+                        <input type="checkbox" id="botStatus">
+                        <span class="slider"></span>
+                    </label>
+                </div>
+                <div class="input-group">
+                    <div class="group-header">
+                        <i class="fas fa-phone-alt"></i><label for="whatsappNumber">Número Celular (+57...)</label>
+                    </div>
+                    <input type="tel" id="whatsappNumber">
+                </div>
+                <div class="input-group">
+                    <div class="group-header">
+                        <i class="fas fa-comment-dots"></i><label for="welcomeMessage">Mensaje de Saludo</label>
+                    </div>
+                    <textarea id="welcomeMessage"></textarea>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary cancel-button">Cancelar</button>
+                <button type="submit" class="btn btn-primary">Guardar Cambios</button>
+            </div>
+        </form></div>
+    </div>
+    <div class="toast" id="toastNotification"></div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            const editButton = document.querySelector('.btn-edit');
+            const modalOverlay = document.getElementById('modalOverlay');
+            const modalForm = document.getElementById('modalForm');
+            const toastNotification = document.getElementById('toastNotification');
+            
+            let config = {
+                botStatus: true,
+                whatsappNumber: '+57 3132217862',
+                welcomeMessage: '¡Hola! Bienvenido a nuestro servicio de atención. ¿En qué puedo ayudarte hoy?'
+            };
+
+            const renderData = () => {
+                const statusDisplay = document.getElementById('botStatusDisplay');
+                statusDisplay.textContent = config.botStatus ? 'Activo' : 'Inactivo';
+                statusDisplay.className = config.botStatus ? 'active' : 'inactive';
+                document.getElementById('displayWhatsappNumber').textContent = config.whatsappNumber;
+                document.getElementById('displayWelcomeMessage').textContent = config.welcomeMessage;
+            };
+
+            const showToast = (message) => {
+                toastNotification.textContent = message;
+                toastNotification.classList.add('show');
+                setTimeout(() => toastNotification.classList.remove('show'), 3000);
+            };
+
+            const openModal = () => {
+                document.getElementById('botStatus').checked = config.botStatus;
+                document.getElementById('whatsappNumber').value = config.whatsappNumber;
+                document.getElementById('welcomeMessage').value = config.welcomeMessage;
+                modalOverlay.classList.add('show');
+            };
+
+            const closeModal = () => modalOverlay.classList.remove('show');
+
+            editButton.addEventListener('click', openModal);
+
+            modalOverlay.addEventListener('click', e => {
+                if (e.target === modalOverlay || e.target.classList.contains('close-button') || e.target.classList.contains('cancel-button')) {
+                    closeModal();
+                }
+            });
+
+            modalForm.addEventListener('submit', e => {
+                e.preventDefault();
+                config.botStatus = document.getElementById('botStatus').checked;
+                config.whatsappNumber = document.getElementById('whatsappNumber').value;
+                config.welcomeMessage = document.getElementById('welcomeMessage').value;
+                
+                renderData();
+                closeModal();
+                showToast('Cambios guardados con éxito');
+            });
+
+            renderData();
+        });
+    </script>
+</body>
+</html>
