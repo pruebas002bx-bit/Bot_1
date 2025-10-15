@@ -76,7 +76,7 @@
         }
 
         .form-content {
-            width: calc(100% - 100px);
+            width: 100%; /* Ajustado para mejor layout */
             transition: opacity 0.5s, transform 0.5s;
         }
 
@@ -106,15 +106,16 @@
         }
 
         .subtitle {
-            font-size: 1.1em; /* Un poco más grande para compensar la falta de título */
+            font-size: 1.1em;
             color: var(--text-secondary);
             margin-bottom: 40px;
-            margin-top: -15px; /* Sube el subtítulo para un mejor espaciado */
+            margin-top: 0; /* Ajustado */
         }
 
         .input-group {
             position: relative;
             margin-bottom: 30px;
+            text-align: left;
         }
 
         .input-field {
@@ -193,7 +194,7 @@
             border: 1px solid transparent;
             width: 100%;
             text-align: center;
-            background-color: rgba(255, 255, 255, 0.7);
+            background-color: rgba(255, 228, 228, 0.8); /* Fondo rojo claro para error */
         }
 
         .error-message {
@@ -215,6 +216,7 @@
             opacity: 0;
             pointer-events: none;
             transition: opacity 0.5s ease;
+            background: linear-gradient(135deg, var(--background-start), var(--background-end));
         }
 
         .loading-container.visible {
@@ -247,11 +249,9 @@
         @media (max-width: 480px) {
             .auth-container {
                 padding: 40px 25px;
-                min-height: 0;
-                height: auto;
             }
             .form-content {
-                width: calc(100% - 50px);
+                width: 100%;
             }
             h2 { font-size: 1.8em; }
         }
@@ -262,6 +262,7 @@
 
         <div class="form-content" id="formContent">
             <img src="https://i.ibb.co/sdjhJhJV/image-removebg-preview-21.png" alt="Logo de la Empresa" class="logo-img">
+            <h2>Bienvenido</h2>
             <p class="subtitle">Inicia sesión para continuar.</p>
             <form id="loginForm">
                 <div class="input-group">
@@ -273,7 +274,7 @@
                     <label for="password" class="input-label">Contraseña</label>
                 </div>
                 <div id="loginErrorMessage" class="message error-message">
-                    Usuario o contraseña incorrectos.
+                    <!-- El mensaje de error se insertará aquí -->
                 </div>
                 <button type="submit" class="btn-submit">Iniciar Sesión</button>
             </form>
@@ -289,47 +290,61 @@
     </div>
 
     <script>
-        const USERS = {
-            'Admin123': { pass: '12345', redirect: 'Menu.html' },
-            'Carlos_Ruiz': { pass: '12345', redirect: 'Menu_Soporte.html' }
-        };
+        // --- INICIO DE LA CORRECCIÓN ---
+        document.addEventListener('DOMContentLoaded', () => {
+            const loginForm = document.getElementById('loginForm');
+            const loginErrorMessage = document.getElementById('loginErrorMessage');
+            const formContent = document.getElementById('formContent');
+            const loadingContainer = document.getElementById('loadingContainer');
+            const progressBar = document.getElementById('progressBar');
 
-        const loginForm = document.getElementById('loginForm');
-        const loginErrorMessage = document.getElementById('loginErrorMessage');
-        const formContent = document.getElementById('formContent');
-        const loadingContainer = document.getElementById('loadingContainer');
-        const progressBar = document.getElementById('progressBar');
-
-        loginForm.addEventListener('submit', function(e) {
-            e.preventDefault();
-            const usernameInput = document.getElementById('username');
-            const passwordInput = document.getElementById('password');
-            const username = usernameInput.value;
-            const password = passwordInput.value;
-            
-            loginErrorMessage.style.display = 'none';
-
-            const user = USERS[username];
-            
-            if (user && user.pass === password) {
-                // Ocultar formulario y mostrar loading
-                formContent.classList.add('hidden');
-                loadingContainer.classList.add('visible');
+            loginForm.addEventListener('submit', async function(e) {
+                e.preventDefault();
                 
-                // Animar barra de progreso
-                setTimeout(() => {
-                    progressBar.style.width = '100%';
-                }, 100);
+                const username = document.getElementById('username').value;
+                const password = document.getElementById('password').value;
+                
+                loginErrorMessage.style.display = 'none';
+                loginErrorMessage.textContent = '';
 
-                // Redireccionar después de la animación
-                setTimeout(() => {
-                    window.location.href = user.redirect;
-                }, 2000); // 2 segundos para que la animación termine
+                try {
+                    const response = await fetch('/api/login', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify({ username, password }),
+                    });
 
-            } else {
-                loginErrorMessage.style.display = 'block';
-            }
+                    const data = await response.json();
+
+                    if (data.success) {
+                        // Ocultar formulario y mostrar loading
+                        formContent.classList.add('hidden');
+                        loadingContainer.classList.add('visible');
+                        
+                        // Animar barra de progreso
+                        setTimeout(() => {
+                            progressBar.style.width = '100%';
+                        }, 100);
+
+                        // Redireccionar después de la animación a la URL del servidor
+                        setTimeout(() => {
+                            window.location.href = data.redirect_url;
+                        }, 1800);
+
+                    } else {
+                        loginErrorMessage.textContent = data.message || 'Error desconocido.';
+                        loginErrorMessage.style.display = 'block';
+                    }
+                } catch (error) {
+                    console.error('Error en el inicio de sesión:', error);
+                    loginErrorMessage.textContent = 'No se pudo conectar con el servidor. Inténtalo de nuevo.';
+                    loginErrorMessage.style.display = 'block';
+                }
+            });
         });
+        // --- FIN DE LA CORRECCIÓN ---
     </script>
 </body>
 </html>

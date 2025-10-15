@@ -106,7 +106,7 @@
             font-size: 14px;
             color: #64748b;
         }
-        .sidebar-footer a {
+        .sidebar-footer .logout-link { /* Clase específica para el enlace de cerrar sesión */
             margin-bottom: 0;
         }
         .main-content {
@@ -129,29 +129,32 @@
             <img src="https://i.ibb.co/sdjhJhJV/image-removebg-preview-21.png" alt="Logo de la Empresa">
         </div>
         <nav class="nav-menu">
-            <a href="#" class="nav-link active" data-page="Dashboard.html"><i class="fas fa-tachometer-alt"></i><span>Dashboard</span></a>
-            <a href="#" class="nav-link" data-page="Bot.html"><i class="fas fa-robot"></i><span>Bot</span></a>
-            <a href="#" class="nav-link" data-page="Usuarios.html"><i class="fas fa-users-cog"></i><span>Usuarios</span></a>
-            <a href="#" class="nav-link" data-page="Configuracion.html"><i class="fas fa-cog"></i><span>Configuración</span></a>
+            <!-- --- INICIO DE LA CORRECCIÓN --- -->
+            <a href="#" class="nav-link active" data-page="{{ url_for('show_page', page_name='Dashboard.html') }}"><i class="fas fa-tachometer-alt"></i><span>Dashboard</span></a>
+            <a href="#" class="nav-link" data-page="{{ url_for('show_page', page_name='Bot.html') }}"><i class="fas fa-robot"></i><span>Bot</span></a>
+            <a href="#" class="nav-link" data-page="{{ url_for('show_page', page_name='Usuarios.html') }}"><i class="fas fa-users-cog"></i><span>Usuarios</span></a>
+            <a href="#" class="nav-link" data-page="{{ url_for('show_page', page_name='Configuracion.html') }}"><i class="fas fa-cog"></i><span>Configuración</span></a>
+            <!-- --- FIN DE LA CORRECCIÓN --- -->
         </nav>
         <div class="sidebar-footer">
             <div class="live-clock">
                 <div id="clock-time" class="time">--:--:--</div>
                 <div id="clock-date" class="date">----------</div>
             </div>
-            <a href="Index.html" class="nav-link"><i class="fas fa-sign-out-alt"></i><span>Cerrar Sesión</span></a>
+            <!-- Ruta corregida para apuntar a la raíz -->
+            <a href="{{ url_for('index') }}" class="logout-link"><i class="fas fa-sign-out-alt"></i><span>Cerrar Sesión</span></a>
         </div>
     </aside>
 
     <main class="main-content">
-        <iframe id="content-frame" src="Dashboard.html" name="content-frame">
+        <!-- Carga la página inicial del dashboard usando la ruta de Flask -->
+        <iframe id="content-frame" src="{{ url_for('show_page', page_name='Dashboard.html') }}" name="content-frame">
             Tu navegador no soporta iframes.
         </iframe>
     </main>
 
     <script>
         document.addEventListener('DOMContentLoaded', function() {
-            const allLinks = document.querySelectorAll('.nav-link');
             const navMenuLinks = document.querySelectorAll('.nav-menu .nav-link');
             const clockTime = document.getElementById('clock-time');
             const clockDate = document.getElementById('clock-date');
@@ -166,29 +169,22 @@
                 clockTime.textContent = `${hours}:${minutes}:${seconds}`;
 
                 const options = { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' };
-                // CORRECCIÓN: El método correcto es toLocaleDateString
                 clockDate.textContent = now.toLocaleDateString('es-ES', options);
             }
 
             updateClock();
             setInterval(updateClock, 1000);
 
-            allLinks.forEach(link => {
+            navMenuLinks.forEach(link => {
                 link.addEventListener('click', function(e) {
                     e.preventDefault();
                     
-                    const page = this.getAttribute('data-page');
-                    const href = this.getAttribute('href');
-
-                    if (href === 'Index.html') {
-                        window.location.href = href;
-                        return;
-                    }
+                    const pageUrl = this.getAttribute('data-page');
                     
-                    if (page) {
+                    if (pageUrl) {
                         if (this.classList.contains('active')) return;
                         
-                        contentFrame.src = page;
+                        contentFrame.src = pageUrl;
                         
                         navMenuLinks.forEach(l => l.classList.remove('active'));
                         this.classList.add('active');
