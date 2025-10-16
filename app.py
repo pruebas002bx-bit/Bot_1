@@ -21,12 +21,11 @@ app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', 'una-clave-secreta-por-defect
 
 db = SQLAlchemy(app)
 
-# --- MODELOS MODIFICADOS ---
+# --- MODELOS (sin cambios) ---
 class User(db.Model):
     __tablename__ = 'users'
     id = db.Column(db.Integer, primary_key=True)
     username = db.Column(db.String(80), unique=True, nullable=False)
-    # Columna para guardar la contraseña en texto plano
     password = db.Column(db.String(256), nullable=False)
     name = db.Column(db.String(120), nullable=False)
     role = db.Column(db.String(80), nullable=False)
@@ -36,7 +35,7 @@ class BotRole(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     title = db.Column(db.String(120), nullable=False)
     knowledge_base = db.Column(db.Text, nullable=True)
-    assignee_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
+    assignee_id = db.Column(db.Integer, db.ForeignKey('users.id', ondelete='SET NULL'), nullable=True)
     status = db.Column(db.String(20), default='Activo', nullable=False)
     chats_received = db.Column(db.Integer, default=0)
     chats_pending = db.Column(db.Integer, default=0)
@@ -49,7 +48,7 @@ class BotConfig(db.Model):
     whatsapp_number = db.Column(db.String(50), nullable=True)
     welcome_message = db.Column(db.Text, nullable=True)
 
-# --- RUTAS (sin cambios) ---
+# --- Rutas (sin cambios) ---
 @app.route('/')
 def index():
     return render_template('Index.html')
@@ -68,21 +67,23 @@ def show_page(page_name):
         return "Not Found", 404
     return render_template(page_name)
 
-# --- API MODIFICADA ---
+# --- API ---
 @app.route('/api/login', methods=['POST'])
 def login():
     data = request.get_json()
     username = data.get('username')
     password = data.get('password')
-    
     user = User.query.filter_by(username=username).first()
-    
-    # Comparación directa de contraseñas
     if user and user.password == password:
         redirect_url = url_for('menu_admin' if user.role == 'Admin' else 'menu_soporte')
         return jsonify({"success": True, "redirect_url": redirect_url})
-    
     return jsonify({"success": False, "message": "Usuario o contraseña incorrectos"}), 401
+
+# --- API de Usuarios (CRUD Completo) ---
+@app.route('/api/users', methods=['GET'])
+def get_users():
+    users = User.query.all()
+    return jsonify([{'id': user.id, 'name': user.name, 'role': user.role, 'username': user.username} for user in users])
 
 @app.route('/api/users', methods=['POST'])
 def add_user():
@@ -90,17 +91,10 @@ def add_user():
     username = data.get('username') or data.get('name', '').replace(' ', '_').lower()
     if User.query.filter_by(username=username).first():
         return jsonify({'message': 'El nombre de usuario ya existe'}), 409
-    
-    # Se guarda la contraseña directamente
     new_user = User(username=username, name=data['name'], password=data['password'], role=data['role'])
     db.session.add(new_user)
     db.session.commit()
-    return jsonify({'id': new_user.id, 'name': new_user.name, 'role': new_user.role}), 201
-    
-@app.route('/api/users', methods=['GET'])
-def get_users():
-    users = User.query.all()
-    return jsonify([{'id': user.id, 'name': user.name, 'role': user.role, 'username': user.username} for user in users])
+    return jsonify({'id': new_user.id, 'name': new_user.name, 'role': new_user.role, 'username': new_user.username}), 201
 
 @app.route('/api/users/<int:id>', methods=['PUT'])
 def update_user(id):
@@ -109,7 +103,6 @@ def update_user(id):
     user.name = data.get('name', user.name)
     user.role = data.get('role', user.role)
     if 'password' in data and data['password']:
-        # Se actualiza la contraseña directamente
         user.password = data['password']
     db.session.commit()
     return jsonify({'message': 'Usuario actualizado correctamente'})
@@ -121,12 +114,36 @@ def delete_user(id):
     db.session.commit()
     return jsonify({'message': 'Usuario eliminado correctamente'})
 
-# --- Endpoints restantes (sin cambios en su lógica) ---
-
+# --- API de Roles de Bot (CRUD Completo) ---
 @app.route('/api/bot_roles', methods=['GET'])
 def get_bot_roles():
     roles = BotRole.query.options(db.joinedload(BotRole.assignee)).all()
     return jsonify([{'id': role.id, 'title': role.title, 'knowledge_base': role.knowledge_base, 'assignee_name': role.assignee.name if role.assignee else 'Sin Asignar', 'assignee_id': role.assignee_id, 'status': role.status, 'chats_received': role.chats_received, 'chats_pending': role.chats_pending} for role in roles])
+
+@app.route('/api/bot_roles', methods=['POST'])
+def add_bot_role():
+    data = request.get_json()
+    new_role = BotRole(
+        title=data['title'],
+        knowledge_base=data.get('knowledge_base', ''),
+        assignee_id=data.get('assignee_id'),
+        status=data.get('status', 'Activo')
+    )
+    db.session.add(new_role)
+    db.session.commit()
+    # Recargar para obtener el nombre del asignado
+    role_data = BotRole.query.get(new_role.id)
+    return jsonify({
+        'id': role_data.id, 
+        'title': role_data.title, 
+        'knowledge_base': role_data.knowledge_base, 
+        'assignee_name': role_data.assignee.name if role_data.assignee else 'Sin Asignar', 
+        'assignee_id': role_data.assignee_id, 
+        'status': role_data.status, 
+        'chats_received': role_data.chats_received, 
+        'chats_pending': role_data.chats_pending
+    }), 201
+
 
 @app.route('/api/bot_roles/<int:id>', methods=['PUT'])
 def update_bot_role(id):
@@ -135,10 +152,20 @@ def update_bot_role(id):
     role.title = data.get('title', role.title)
     role.knowledge_base = data.get('knowledge_base', role.knowledge_base)
     role.status = data.get('status', role.status)
-    role.assignee_id = data.get('assignee_id')
+    # Permite desasignar enviando null o un id vacío
+    assignee_id = data.get('assignee_id')
+    role.assignee_id = int(assignee_id) if assignee_id else None
     db.session.commit()
     return jsonify({'message': 'Rol del bot actualizado correctamente'})
 
+@app.route('/api/bot_roles/<int:id>', methods=['DELETE'])
+def delete_bot_role(id):
+    role = BotRole.query.get_or_404(id)
+    db.session.delete(role)
+    db.session.commit()
+    return jsonify({'message': 'Rol del bot eliminado correctamente'})
+
+# --- API de Configuración de Bot (sin cambios) ---
 @app.route('/api/bot_config', methods=['GET'])
 def get_bot_config():
     config = BotConfig.query.first()

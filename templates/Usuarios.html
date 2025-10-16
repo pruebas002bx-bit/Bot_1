@@ -14,9 +14,7 @@
             --accent-color: #2D3748;
             --accent-hover: #4A5568;
             --danger-color: #e53e3e;
-            --danger-hover: #c53030;
             --edit-color: #3b82f6;
-            --edit-hover: #2563eb;
             --input-bg: rgba(243, 244, 246, 0.8);
             --input-border: #d1d5db;
         }
@@ -35,58 +33,47 @@
             min-height: 100vh;
             overflow-y: auto;
         }
-
         .user-management-container {
             width: 100%;
             max-width: 1200px;
             animation: fadeIn 0.8s ease-out;
         }
-
         @keyframes fadeIn {
             from { opacity: 0; transform: translateY(20px); }
             to { opacity: 1; transform: translateY(0); }
         }
-
         .header {
             text-align: center;
             margin-bottom: 40px;
         }
-
         .header h1 {
             font-size: 3em;
             font-weight: 800;
             margin-bottom: 8px;
-            color: var(--text-primary);
         }
-
         .header p {
             font-size: 1.1em;
             color: var(--text-secondary);
             max-width: 600px;
             margin: 0 auto;
         }
-
         .content-grid {
             display: grid;
             grid-template-columns: 1fr 2fr;
             gap: 30px;
             align-items: flex-start;
         }
-
         .form-card, .table-card {
             background: var(--card-bg);
-            backdrop-filter: blur(20px) saturate(180%);
-            -webkit-backdrop-filter: blur(20px) saturate(180%);
+            backdrop-filter: blur(20px);
             border-radius: 24px;
             border: 1px solid var(--card-border);
             box-shadow: 0 8px 32px 0 var(--shadow-color);
             padding: 35px;
         }
-        
         .card-header {
             text-align: center;
         }
-        
         .card-header h2 {
             font-size: 1.5em;
             font-weight: 700;
@@ -94,10 +81,8 @@
             border-bottom: 1px solid rgba(209, 213, 219, 0.5);
             padding-bottom: 15px;
         }
-
-        .form-group { margin-bottom: 20px; }
-        .form-group label { display: block; font-weight: 600; color: var(--text-secondary); margin-bottom: 10px; font-size: 0.9em; text-align: left;}
-        
+        .form-group { margin-bottom: 20px; text-align: left;}
+        .form-group label { display: block; font-weight: 600; color: var(--text-secondary); margin-bottom: 10px; font-size: 0.9em;}
         .form-group input, .form-group select {
             width: 100%;
             padding: 14px 16px;
@@ -106,25 +91,12 @@
             background-color: var(--input-bg);
             font-size: 1em;
             transition: border-color 0.2s, box-shadow 0.2s;
-            color: var(--text-primary);
-            box-sizing: border-box; 
         }
-
         .form-group input:focus, .form-group select:focus {
             outline: none;
             border-color: var(--edit-color);
             box-shadow: 0 0 0 4px rgba(59, 130, 246, 0.2);
         }
-        
-        .add-form-container {
-            margin: 0 auto;
-        }
-        
-        #addUserForm .form-group input,
-        #addUserForm .form-group select {
-            width: 320px;
-        }
-        
         .btn {
             width: 100%;
             padding: 15px 20px;
@@ -139,27 +111,24 @@
         .btn:hover { transform: translateY(-2px); }
         .btn-primary { background-color: var(--accent-color); color: white; }
         .btn-primary:hover { background-color: var(--accent-hover); }
-
         .users-table { width: 100%; border-collapse: separate; border-spacing: 0 10px; }
         .users-table th, .users-table td { text-align: left; padding: 15px 20px; vertical-align: middle; }
         .users-table th { font-size: 0.9em; font-weight: 700; color: var(--text-secondary); text-transform: uppercase; }
-        .users-table td { background-color: rgba(255, 255, 255, 0.4); border-bottom: 1px solid #e2e8f0; }
+        .users-table td { background-color: rgba(255, 255, 255, 0.4); }
         .users-table tbody tr:hover td { background-color: rgba(255, 255, 255, 0.8); }
         .users-table td:first-child { border-radius: 12px 0 0 12px; }
         .users-table td:last-child { border-radius: 0 12px 12px 0; }
-        
         .action-buttons button { background: transparent; border: none; cursor: pointer; font-size: 1.1em; padding: 8px 10px; border-radius: 8px; transition: all 0.2s; margin-right: 5px; }
         .action-buttons .btn-edit { color: var(--edit-color); }
         .action-buttons .btn-edit:hover { background-color: rgba(59, 130, 246, 0.1); }
         .action-buttons .btn-delete { color: var(--danger-color); }
         .action-buttons .btn-delete:hover { background-color: rgba(229, 62, 62, 0.1); }
-
-        .modal-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0, 0, 0, 0.5); backdrop-filter: blur(10px); display: flex; align-items: center; justify-content: center; z-index: 1000; opacity: 0; pointer-events: none; transition: opacity 0.3s ease; }
-        .modal-overlay.show { opacity: 1; pointer-events: all; }
+        .modal-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0, 0, 0, 0.5); backdrop-filter: blur(10px); display: none; align-items: center; justify-content: center; z-index: 1000; opacity: 0; transition: opacity 0.3s ease; }
+        .modal-overlay.show { display: flex; opacity: 1; }
         .modal-content { background: #ffffff; border-radius: 20px; padding: 35px 45px; width: 100%; max-width: 500px; box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2); position: relative; transform: scale(0.95); transition: transform 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94); }
         .modal-overlay.show .modal-content { transform: scale(1); }
         .modal-header { text-align: center; margin-bottom: 25px; }
-        .modal-header h2 { font-size: 1.8em; color: var(--text-primary); font-weight: 700; }
+        .modal-header h2 { font-size: 1.8em; }
         .modal-close-btn { position: absolute; top: 15px; right: 20px; background: #f1f5f9; border: none; font-size: 1.2em; color: var(--text-secondary); cursor: pointer; transition: all 0.2s; width: 32px; height: 32px; border-radius: 50%; line-height: 32px; text-align: center; }
         .modal-close-btn:hover { background: #e2e8f0; color: var(--text-primary); }
         .modal-actions { display: flex; gap: 15px; margin-top: 25px; }
@@ -178,30 +147,28 @@
         <div class="content-grid">
             <div class="form-card">
                 <div class="card-header"><h2>Añadir Nuevo Usuario</h2></div>
-                <div class="add-form-container">
-                    <form id="addUserForm">
-                        <div class="form-group">
-                            <label for="nombre">Nombre Completo</label>
-                            <input type="text" id="nombre" name="nombre" placeholder="Ej: Valentina Rojas" required>
-                        </div>
-                        <div class="form-group">
-                            <label for="password">Contraseña</label>
-                            <input type="password" id="password" name="password" placeholder="••••••••" required>
-                        </div>
-                        <div class="form-group">
-                            <label for="rol">Rol Asignado</label>
-                            <select id="rol" name="rol" required></select>
-                        </div>
-                        <button type="submit" class="btn btn-primary">Añadir Usuario</button>
-                    </form>
-                </div>
+                <form id="addUserForm">
+                    <div class="form-group">
+                        <label for="nombre">Nombre Completo</label>
+                        <input type="text" id="nombre" name="nombre" placeholder="Ej: Valentina Rojas" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="password">Contraseña</label>
+                        <input type="password" id="password" name="password" placeholder="••••••••" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="rol">Rol del Sistema</label>
+                        <select id="rol" name="rol" required></select>
+                    </div>
+                    <button type="submit" class="btn btn-primary">Añadir Usuario</button>
+                </form>
             </div>
 
             <div class="table-card">
                 <div class="card-header"><h2>Usuarios Activos</h2></div>
                 <table class="users-table">
                     <thead>
-                        <tr><th>Nombre</th><th>Rol</th><th>Acciones</th></tr>
+                        <tr><th>Nombre</th><th>Username</th><th>Rol</th><th>Acciones</th></tr>
                     </thead>
                     <tbody id="user-table-body"></tbody>
                 </table>
@@ -211,9 +178,10 @@
     
     <div class="modal-overlay" id="editModalOverlay">
         <div class="modal-content">
-            <button class="modal-close-btn" id="closeModalBtn"><i class="fas fa-times"></i></button>
+            <button class="modal-close-btn"><i class="fas fa-times"></i></button>
             <div class="modal-header"><h2>Editar Usuario</h2></div>
             <form id="editUserForm">
+                <input type="hidden" id="editUserId">
                 <div class="form-group">
                     <label for="editNombre">Nombre Completo</label>
                     <input type="text" id="editNombre" name="nombre" required>
@@ -223,49 +191,41 @@
                     <input type="password" id="editPassword" name="password" placeholder="Dejar en blanco para no cambiar">
                 </div>
                 <div class="form-group">
-                    <label for="editRol">Rol Asignado</label>
+                    <label for="editRol">Rol del Sistema</label>
                     <select id="editRol" name="rol" required></select>
                 </div>
                 <div class="modal-actions">
-                    <button type="button" class="btn btn-secondary" id="cancelButton">Cancelar</button>
+                    <button type="button" class="btn btn-secondary">Cancelar</button>
                     <button type="submit" class="btn btn-primary modal-btn">Guardar Cambios</button>
                 </div>
             </form>
         </div>
     </div>
-    <script>
+<script>
 document.addEventListener('DOMContentLoaded', () => {
-    const ROLES_BOT = ["Soporte Técnico Nivel 1", "Agente de Ventas", "Gestión de Citas", "Recursos Humanos", "Atención al Cliente VIP", "Reservas y Viajes"];
-    let users = [
-        { name: "Ana Gómez", role: "Soporte Técnico Nivel 1", pass: "pass123" },
-        { name: "Carlos Ruiz", role: "Agente de Ventas", pass: "superv_carlos" },
-        { name: "Laura Méndez", role: "Recursos Humanos", pass: "laurita_HR" },
-        { name: "Marcos Aguilar", role: "Atención al Cliente VIP", pass: "admin_Secure1" }
-    ];
-
+    const SYSTEM_ROLES = ["Admin", "Soporte"];
+    
     const addUserForm = document.getElementById('addUserForm');
     const userTableBody = document.getElementById('user-table-body');
     const modalOverlay = document.getElementById('editModalOverlay');
-    const closeModalBtn = document.getElementById('closeModalBtn');
-    const cancelButton = document.getElementById('cancelButton');
     const editUserForm = document.getElementById('editUserForm');
-    const addRolSelect = document.getElementById('rol');
-    const editRolSelect = document.getElementById('editRol');
-    let editingRow = null;
-
+    
     const populateRoleSelects = () => {
-        const rolesHtml = ROLES_BOT.map(role => `<option value="${role}">${role}</option>`).join('');
+        const addRolSelect = document.getElementById('rol');
+        const editRolSelect = document.getElementById('editRol');
+        const rolesHtml = SYSTEM_ROLES.map(role => `<option value="${role}">${role}</option>`).join('');
         addRolSelect.innerHTML = rolesHtml;
         editRolSelect.innerHTML = rolesHtml;
     };
     
-    const renderTable = () => {
+    const renderTable = (users) => {
         userTableBody.innerHTML = '';
-        users.forEach((user, index) => {
+        users.forEach(user => {
             const row = userTableBody.insertRow();
-            row.dataset.index = index;
+            row.dataset.id = user.id;
             row.innerHTML = `
                 <td>${user.name}</td>
+                <td>${user.username}</td>
                 <td>${user.role}</td>
                 <td class="action-buttons">
                     <button class="btn-edit" title="Editar"><i class="fas fa-pencil-alt"></i></button>
@@ -275,64 +235,115 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     };
 
-    const openEditModal = (row) => {
-        editingRow = row;
-        const user = users[row.dataset.index];
+    const loadUsers = async () => {
+        try {
+            const response = await fetch('/api/users');
+            const users = await response.json();
+            renderTable(users);
+        } catch (error) {
+            console.error('Error al cargar usuarios:', error);
+        }
+    };
+
+    const openEditModal = (user) => {
+        document.getElementById('editUserId').value = user.id;
         document.getElementById('editNombre').value = user.name;
         document.getElementById('editPassword').value = '';
-        editRolSelect.value = user.role;
+        document.getElementById('editRol').value = user.role;
         modalOverlay.classList.add('show');
     };
     
     const closeEditModal = () => {
         modalOverlay.classList.remove('show');
-        editingRow = null;
     };
 
-    userTableBody.addEventListener('click', (e) => {
+    userTableBody.addEventListener('click', async (e) => {
         const button = e.target.closest('button');
         if (!button) return;
+        
         const row = button.closest('tr');
-        if (button.classList.contains('btn-edit')) openEditModal(row);
-        else if (button.classList.contains('btn-delete')) {
-            if (confirm(`¿Estás seguro de que quieres eliminar a ${users[row.dataset.index].name}?`)) {
-                users.splice(row.dataset.index, 1);
-                renderTable();
+        const userId = row.dataset.id;
+
+        if (button.classList.contains('btn-edit')) {
+            const response = await fetch('/api/users');
+            const users = await response.json();
+            const user = users.find(u => u.id == userId);
+            if (user) openEditModal(user);
+        } else if (button.classList.contains('btn-delete')) {
+            const userName = row.cells[0].textContent;
+            if (confirm(`¿Estás seguro de que quieres eliminar a ${userName}?`)) {
+                try {
+                    await fetch(`/api/users/${userId}`, { method: 'DELETE' });
+                    loadUsers();
+                } catch (error) {
+                    console.error('Error al eliminar:', error);
+                    alert('No se pudo eliminar el usuario.');
+                }
             }
         }
     });
 
-    editUserForm.addEventListener('submit', (e) => {
+    editUserForm.addEventListener('submit', async (e) => {
         e.preventDefault();
-        if (!editingRow) return;
-        const userIndex = editingRow.dataset.index;
-        const newPassword = document.getElementById('editPassword').value;
-        users[userIndex].name = document.getElementById('editNombre').value;
-        users[userIndex].role = document.getElementById('editRol').value;
-        if (newPassword.trim() !== '') users[userIndex].pass = newPassword;
-        renderTable();
-        closeEditModal();
+        const userId = document.getElementById('editUserId').value;
+        const password = document.getElementById('editPassword').value;
+        const userData = {
+            name: document.getElementById('editNombre').value,
+            role: document.getElementById('editRol').value,
+        };
+        if (password.trim() !== '') {
+            userData.password = password;
+        }
+
+        try {
+            await fetch(`/api/users/${userId}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(userData),
+            });
+            loadUsers();
+            closeEditModal();
+        } catch (error) {
+            console.error('Error al actualizar:', error);
+            alert('No se pudo actualizar el usuario.');
+        }
     });
 
-    addUserForm.addEventListener('submit', (e) => {
+    addUserForm.addEventListener('submit', async (e) => {
         e.preventDefault();
-        users.push({
+        const userData = {
             name: document.getElementById('nombre').value,
+            password: document.getElementById('password').value,
             role: document.getElementById('rol').value,
-            pass: document.getElementById('password').value
-        });
-        renderTable();
-        addUserForm.reset();
+        };
+
+        try {
+            const response = await fetch('/api/users', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(userData),
+            });
+            if (response.ok) {
+                loadUsers();
+                addUserForm.reset();
+            } else {
+                const error = await response.json();
+                alert(`Error: ${error.message}`);
+            }
+        } catch (error) {
+            console.error('Error al añadir:', error);
+            alert('No se pudo añadir el usuario.');
+        }
     });
     
-    closeModalBtn.addEventListener('click', closeEditModal);
-    cancelButton.addEventListener('click', closeEditModal);
     modalOverlay.addEventListener('click', (e) => {
-        if (e.target === modalOverlay) closeEditModal();
+        if (e.target.classList.contains('modal-overlay') || e.target.classList.contains('btn-secondary') || e.target.classList.contains('modal-close-btn')) {
+            closeEditModal();
+        }
     });
 
     populateRoleSelects();
-    renderTable();
+    loadUsers();
 });
 </script>
 
