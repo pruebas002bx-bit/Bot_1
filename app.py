@@ -3,6 +3,10 @@ from flask import Flask, render_template, request, jsonify, redirect, url_for
 from flask_sqlalchemy import SQLAlchemy
 from werkzeug.security import generate_password_hash, check_password_hash
 from dotenv import load_dotenv
+import logging
+
+# Configuración de logging para ver los mensajes en OnRender
+logging.basicConfig(level=logging.INFO)
 
 load_dotenv()
 
@@ -18,6 +22,7 @@ app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', 'una-clave-secreta-por-defect
 
 db = SQLAlchemy(app)
 
+# --- MODELOS (sin cambios) ---
 class User(db.Model):
     __tablename__ = 'users'
     id = db.Column(db.Integer, primary_key=True)
@@ -44,7 +49,7 @@ class BotConfig(db.Model):
     whatsapp_number = db.Column(db.String(50), nullable=True)
     welcome_message = db.Column(db.Text, nullable=True)
 
-# --- Rutas ---
+# --- RUTAS (sin cambios) ---
 @app.route('/')
 def index():
     return render_template('Index.html')
@@ -69,17 +74,35 @@ def login():
     data = request.get_json()
     username = data.get('username')
     password = data.get('password')
+    
+    app.logger.info(f"Intento de login para el usuario: {username}")
+    
     user = User.query.filter_by(username=username).first()
-    if user and check_password_hash(user.password_hash, password):
+    
+    if not user:
+        app.logger.warning(f"Usuario '{username}' no encontrado en la base de datos.")
+        return jsonify({"success": False, "message": "Usuario o contraseña incorrectos"}), 401
+    
+    # --- LOGS DE DEPURACIÓN ---
+    app.logger.info(f"Hash en la BD para '{username}': {user.password_hash}")
+    
+    # Verificamos la contraseña
+    is_password_correct = check_password_hash(user.password_hash, password)
+    app.logger.info(f"La contraseña para '{username}' es correcta? {is_password_correct}")
+
+    if is_password_correct:
+        app.logger.info(f"Login exitoso para '{username}'. Redirigiendo...")
         redirect_url = url_for('menu_admin' if user.role == 'Admin' else 'menu_soporte')
         return jsonify({"success": True, "redirect_url": redirect_url})
-    return jsonify({"success": False, "message": "Usuario o contraseña incorrectos"}), 401
+    else:
+        app.logger.error(f"¡LA CONTRASEÑA NO COINCIDE para el usuario '{username}'!")
+        return jsonify({"success": False, "message": "Usuario o contraseña incorrectos"}), 401
 
-# --- Función de Hashing Estandarizada ---
+# --- Función de Hashing (sin cambios) ---
 def create_password_hash(password):
-    # Usamos el método por defecto que es robusto y compatible
     return generate_password_hash(password)
 
+# --- Endpoints de API (sin cambios) ---
 @app.route('/api/users', methods=['POST'])
 def add_user():
     data = request.get_json()
@@ -93,7 +116,6 @@ def add_user():
     db.session.commit()
     return jsonify({'id': new_user.id, 'name': new_user.name, 'role': new_user.role}), 201
     
-# (El resto de los endpoints no necesitan cambios)
 @app.route('/api/users', methods=['GET'])
 def get_users():
     users = User.query.all()
