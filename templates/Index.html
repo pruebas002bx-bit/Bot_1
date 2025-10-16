@@ -290,7 +290,6 @@
     </div>
 
     <script>
-        // --- INICIO DE LA CORRECCIÓN ---
         document.addEventListener('DOMContentLoaded', () => {
             const loginForm = document.getElementById('loginForm');
             const loginErrorMessage = document.getElementById('loginErrorMessage');
@@ -319,16 +318,13 @@
                     const data = await response.json();
 
                     if (data.success) {
-                        // Ocultar formulario y mostrar loading
                         formContent.classList.add('hidden');
                         loadingContainer.classList.add('visible');
                         
-                        // Animar barra de progreso
                         setTimeout(() => {
                             progressBar.style.width = '100%';
                         }, 100);
 
-                        // Redireccionar después de la animación a la URL del servidor
                         setTimeout(() => {
                             window.location.href = data.redirect_url;
                         }, 1800);
@@ -344,7 +340,7 @@
                 }
             });
         });
-        // --- FIN DE LA CORRECCIÓN ---
     </script>
 </body>
 </html>
+

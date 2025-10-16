@@ -1,7 +1,6 @@
 import os
 from flask import Flask, render_template, request, jsonify, redirect, url_for
 from flask_sqlalchemy import SQLAlchemy
-from werkzeug.security import generate_password_hash, check_password_hash
 from dotenv import load_dotenv
 import logging
 
@@ -22,12 +21,13 @@ app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', 'una-clave-secreta-por-defect
 
 db = SQLAlchemy(app)
 
-# --- MODELOS (sin cambios) ---
+# --- MODELOS MODIFICADOS ---
 class User(db.Model):
     __tablename__ = 'users'
     id = db.Column(db.Integer, primary_key=True)
     username = db.Column(db.String(80), unique=True, nullable=False)
-    password_hash = db.Column(db.String(256), nullable=False)
+    # Columna para guardar la contraseña en texto plano
+    password = db.Column(db.String(256), nullable=False)
     name = db.Column(db.String(120), nullable=False)
     role = db.Column(db.String(80), nullable=False)
 
@@ -68,41 +68,22 @@ def show_page(page_name):
         return "Not Found", 404
     return render_template(page_name)
 
-# --- API ---
+# --- API MODIFICADA ---
 @app.route('/api/login', methods=['POST'])
 def login():
     data = request.get_json()
     username = data.get('username')
     password = data.get('password')
     
-    app.logger.info(f"Intento de login para el usuario: {username}")
-    
     user = User.query.filter_by(username=username).first()
     
-    if not user:
-        app.logger.warning(f"Usuario '{username}' no encontrado en la base de datos.")
-        return jsonify({"success": False, "message": "Usuario o contraseña incorrectos"}), 401
-    
-    # --- LOGS DE DEPURACIÓN ---
-    app.logger.info(f"Hash en la BD para '{username}': {user.password_hash}")
-    
-    # Verificamos la contraseña
-    is_password_correct = check_password_hash(user.password_hash, password)
-    app.logger.info(f"La contraseña para '{username}' es correcta? {is_password_correct}")
-
-    if is_password_correct:
-        app.logger.info(f"Login exitoso para '{username}'. Redirigiendo...")
+    # Comparación directa de contraseñas
+    if user and user.password == password:
         redirect_url = url_for('menu_admin' if user.role == 'Admin' else 'menu_soporte')
         return jsonify({"success": True, "redirect_url": redirect_url})
-    else:
-        app.logger.error(f"¡LA CONTRASEÑA NO COINCIDE para el usuario '{username}'!")
-        return jsonify({"success": False, "message": "Usuario o contraseña incorrectos"}), 401
+    
+    return jsonify({"success": False, "message": "Usuario o contraseña incorrectos"}), 401
 
-# --- Función de Hashing (sin cambios) ---
-def create_password_hash(password):
-    return generate_password_hash(password)
-
-# --- Endpoints de API (sin cambios) ---
 @app.route('/api/users', methods=['POST'])
 def add_user():
     data = request.get_json()
@@ -110,8 +91,8 @@ def add_user():
     if User.query.filter_by(username=username).first():
         return jsonify({'message': 'El nombre de usuario ya existe'}), 409
     
-    hashed_password = create_password_hash(data['password'])
-    new_user = User(username=username, name=data['name'], password_hash=hashed_password, role=data['role'])
+    # Se guarda la contraseña directamente
+    new_user = User(username=username, name=data['name'], password=data['password'], role=data['role'])
     db.session.add(new_user)
     db.session.commit()
     return jsonify({'id': new_user.id, 'name': new_user.name, 'role': new_user.role}), 201
@@ -128,7 +109,8 @@ def update_user(id):
     user.name = data.get('name', user.name)
     user.role = data.get('role', user.role)
     if 'password' in data and data['password']:
-        user.password_hash = create_password_hash(data['password'])
+        # Se actualiza la contraseña directamente
+        user.password = data['password']
     db.session.commit()
     return jsonify({'message': 'Usuario actualizado correctamente'})
 
@@ -138,6 +120,8 @@ def delete_user(id):
     db.session.delete(user)
     db.session.commit()
     return jsonify({'message': 'Usuario eliminado correctamente'})
+
+# --- Endpoints restantes (sin cambios en su lógica) ---
 
 @app.route('/api/bot_roles', methods=['GET'])
 def get_bot_roles():
