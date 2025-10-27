@@ -116,11 +116,12 @@ class Message(db.Model):
     conversation = db.relationship('Conversation', back_populates='messages')
 
 # --- RUTAS BÁSICAS (PROTEGIDAS) ---
+
 @app.route('/')
 def index():
-    if current_user.is_authenticated:
-        redirect_url = url_for('menu_admin' if current_user.role == 'Admin' else 'menu_soporte')
-        return redirect(redirect_url)
+    # Esta ruta SIEMPRE debe mostrar la página de login.
+    # Si un usuario ya logueado la visita, verá el login de nuevo,
+    # lo cual es el comportamiento esperado para una página de inicio.
     return render_template('Index.html')
 
 @app.route('/menu_admin')
