@@ -17,9 +17,7 @@
             --status-active: #10B981;
             --status-inactive: #6B7280;
             --status-pending: #EF4444;
-            /* --- INICIO CORRECCIÓN: Color para resueltos --- */
             --status-resolved: #3B82F6; /* Azul */
-            /* --- FIN CORRECCIÓN --- */
             --card-border: rgba(209, 213, 219, 0.7);
             --button-bg: #2D3748;
             --button-hover-bg: #4A5568;
@@ -37,7 +35,7 @@
         }
         .main-container {
             width: 100%;
-            max-width: 1300px; /* Un poco más ancho para 3 contadores */
+            max-width: 1300px;
             margin: 40px auto;
             padding: 40px;
             background: var(--background-card);
@@ -51,7 +49,7 @@
         .header { text-align: center; margin-bottom: 40px; }
         .header h1 { font-size: 2.8em; font-weight: 800; color: var(--text-primary); margin-bottom: 12px; }
         .header p { font-size: 1.15em; color: var(--text-secondary); max-width: 600px; margin: 0 auto; }
-        .roles-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(360px, 1fr)); gap: 30px; } /* Ajuste minmax */
+        .roles-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(360px, 1fr)); gap: 30px; }
         .role-card, .add-role-card {
             background-color: var(--background-card);
             border: 1px solid var(--card-border);
@@ -85,9 +83,7 @@
         .stat-number { font-size: 1.6em; font-weight: 700; line-height: 1; }
         .stat-label { font-size: 0.8em; color: var(--text-secondary); }
         .stat-item.pending .stat-icon, .stat-item.pending .stat-number { color: var(--status-pending); }
-        /* --- INICIO CORRECCIÓN: Estilo para resueltos --- */
         .stat-item.resolved .stat-icon, .stat-item.resolved .stat-number { color: var(--status-resolved); }
-        /* --- FIN CORRECCIÓN --- */
         .card-footer { margin-top: auto; padding-top: 25px; border-top: 1px solid rgba(209, 213, 219, 0.4); text-align: right; }
         .btn-edit { background-color: var(--button-bg); color: var(--white); border: none; padding: 10px 20px; border-radius: 10px; font-weight: 600; cursor: pointer; transition: background-color 0.3s ease; }
         .btn-edit:hover { background-color: var(--button-hover-bg); }
@@ -159,17 +155,16 @@ document.addEventListener('DOMContentLoaded', async () => {
             users = await response.json();
         } catch (error) {
             console.error('Error al cargar usuarios:', error);
-            // Podrías mostrar un mensaje al usuario aquí
         }
     };
-    
-    // --- INICIO CORRECCIÓN: HTML de la tarjeta ---
+
     const createRoleCardHTML = (role) => {
-        // Asegurar que los contadores sean números (o 0 si son null/undefined)
         const received = Number(role.chats_received) || 0;
         const pending = Number(role.chats_pending) || 0;
         const resolved = Number(role.chats_resolved) || 0;
 
+        // --- INICIO CORRECCIÓN ---
+        // Reemplazar comentarios con el código HTML correcto
         return `
             <div class="role-card" data-id="${role.id}">
                 <div class="card-header">
@@ -190,8 +185,8 @@ document.addEventListener('DOMContentLoaded', async () => {
                             <i class="fas fa-clock stat-icon"></i>
                             <div><div class="stat-number">${pending}</div><div class="stat-label">Pendientes</div></div>
                         </div>
-                        <div class="stat-item resolved"> {/* Nueva clase 'resolved' */}
-                            <i class="fas fa-check-circle stat-icon"></i> {/* Nuevo icono */}
+                        <div class="stat-item resolved"> {/* Se añade la clase 'resolved' */}
+                            <i class="fas fa-check-circle stat-icon"></i> {/* Se usa el icono correcto */}
                             <div><div class="stat-number">${resolved}</div><div class="stat-label">Resueltos</div></div>
                         </div>
                     </div>
@@ -199,8 +194,8 @@ document.addEventListener('DOMContentLoaded', async () => {
                 <div class="card-footer"><button class="btn-edit">Editar</button></div>
             </div>
         `;
+        // --- FIN CORRECCIÓN ---
     };
-    // --- FIN CORRECCIÓN ---
 
     const createAddCardHTML = () => `<div class="add-role-card" id="addRoleCard"><div class="add-role-icon"><i class="fas fa-plus-circle"></i></div><div class="add-role-text">Crear Nuevo Rol</div></div>`;
 
@@ -211,12 +206,10 @@ document.addEventListener('DOMContentLoaded', async () => {
     const populateAssigneeSelect = (selectedId) => {
         const assigneeSelect = document.getElementById('modalAssignee');
         assigneeSelect.innerHTML = '<option value="">Sin Asignar</option>';
-        // Ordenar usuarios alfabéticamente
         users.sort((a, b) => a.name.localeCompare(b.name)).forEach(user => {
             const option = document.createElement('option');
             option.value = user.id;
             option.textContent = user.name;
-            // Asegurar comparación numérica
             if (user.id === Number(selectedId)) {
                 option.selected = true;
             }
@@ -231,7 +224,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             deleteRoleBtn.style.display = 'block';
             document.getElementById('modalRoleId').value = role.id;
             document.getElementById('modalRoleTitle').value = role.title;
-            document.getElementById('modalKnowledgeBase').value = role.knowledge_base || ''; // Default a string vacío
+            document.getElementById('modalKnowledgeBase').value = role.knowledge_base || '';
             document.getElementById('modalStatus').value = role.status;
             populateAssigneeSelect(role.assignee_id);
         } else {
@@ -256,18 +249,17 @@ document.addEventListener('DOMContentLoaded', async () => {
             rolesGrid.innerHTML = `<p style="color: red; grid-column: 1 / -1;">Error al cargar roles.</p>`;
         }
     };
-    
+
     rolesGrid.addEventListener('click', async (e) => {
         const editButton = e.target.closest('.btn-edit');
         if (editButton) {
             const card = editButton.closest('.role-card');
             const roleId = card.dataset.id;
             try {
-                // Volver a fetchear por si acaso, aunque podríamos usar caché
-                const response = await fetch(`/api/bot_roles`); 
+                const response = await fetch(`/api/bot_roles`);
                 if (!response.ok) throw new Error('Error fetching role details');
                 const roles = await response.json();
-                const role = roles.find(r => r.id == roleId); // Comparación no estricta por si acaso
+                const role = roles.find(r => r.id == roleId);
                 if (role) openModal(role);
                 else alert('No se encontró el rol.');
             } catch (error) {
@@ -296,7 +288,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             const response = await fetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(roleData) });
             if (response.ok) {
                 closeModal();
-                await loadRoles(); // Recargar roles
+                await loadRoles();
             } else {
                  const error = await response.json();
                 alert(`Error al guardar: ${error.message || 'Error desconocido'}`);
@@ -306,7 +298,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             alert('Error de conexión al guardar.');
         }
     });
-    
+
     deleteRoleBtn.addEventListener('click', async () => {
         const roleId = document.getElementById('modalRoleId').value;
         if (roleId && confirm('¿Estás seguro de que quieres eliminar este rol? Esta acción no se puede deshacer.')) {
@@ -314,7 +306,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                 const response = await fetch(`/api/bot_roles/${roleId}`, { method: 'DELETE' });
                 if (response.ok) {
                     closeModal();
-                    await loadRoles(); // Recargar roles
+                    await loadRoles();
                 } else {
                     alert('Error al eliminar el rol.');
                 }
@@ -332,8 +324,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
 
     // Carga inicial
-    await fetchUsers(); // Cargar usuarios primero para el dropdown
-    await loadRoles();  // Luego cargar roles
+    await fetchUsers();
+    await loadRoles();
 });
 </script>
 
