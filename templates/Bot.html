@@ -164,7 +164,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         const resolved = Number(role.chats_resolved) || 0;
 
         // --- INICIO CORRECCIÓN ---
-        // Reemplazar comentarios con el código HTML correcto
+        // Se eliminan los comentarios { /* ... */ }
         return `
             <div class="role-card" data-id="${role.id}">
                 <div class="card-header">
@@ -185,8 +185,8 @@ document.addEventListener('DOMContentLoaded', async () => {
                             <i class="fas fa-clock stat-icon"></i>
                             <div><div class="stat-number">${pending}</div><div class="stat-label">Pendientes</div></div>
                         </div>
-                        <div class="stat-item resolved"> {/* Se añade la clase 'resolved' */}
-                            <i class="fas fa-check-circle stat-icon"></i> {/* Se usa el icono correcto */}
+                        <div class="stat-item resolved">
+                            <i class="fas fa-check-circle stat-icon"></i>
                             <div><div class="stat-number">${resolved}</div><div class="stat-label">Resueltos</div></div>
                         </div>
                     </div>
