@@ -6,3 +6,4 @@ gunicorn
 python-dotenv
 twilio
 google-generativeai
+Flask-Login

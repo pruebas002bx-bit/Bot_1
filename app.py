@@ -5,25 +5,26 @@ from flask import Flask, render_template, request, jsonify, redirect, url_for
 from flask_sqlalchemy import SQLAlchemy
 from dotenv import load_dotenv
 from twilio.twiml.messaging_response import MessagingResponse
-from twilio.rest import Client # Para enviar mensajes desde la app
+from twilio.rest import Client
 from datetime import datetime, timedelta
 from sqlalchemy import func
+
+# --- NUEVAS IMPORTACIONES PARA SESIONES ---
+from flask_login import LoginManager, UserMixin, login_user, logout_user, login_required, current_user
 
 # --- CONFIGURACIÓN ---
 logging.basicConfig(level=logging.INFO)
 load_dotenv()
 
-# --- CONFIGURACIÓN DE TWILIO (NUEVO) ---
-# Necesario para enviar mensajes desde la app
+# --- CONFIGURACIÓN DE TWILIO ---
 TWILIO_ACCOUNT_SID = os.getenv('TWILIO_ACCOUNT_SID')
 TWILIO_AUTH_TOKEN = os.getenv('TWILIO_AUTH_TOKEN')
-TWILIO_WHATSAPP_NUMBER = os.getenv('TWILIO_WHATSAPP_NUMBER') # Tu número de Twilio (ej: 'whatsapp:+14155238886')
-
+TWILIO_WHATSAPP_NUMBER = os.getenv('TWILIO_WHATSAPP_NUMBER')
 try:
     twilio_client = Client(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
     logging.info("Cliente de Twilio inicializado.")
 except Exception as e:
-    logging.warning(f"No se pudo inicializar el cliente de Twilio: {e}. Faltan TWILIO_ACCOUNT_SID o TWILIO_AUTH_TOKEN.")
+    logging.warning(f"No se pudo inicializar el cliente de Twilio: {e}.")
     twilio_client = None
 
 # --- CONFIGURACIÓN DE IA ---
@@ -44,18 +45,32 @@ if db_uri and db_uri.startswith("postgres://"):
 
 app.config['SQLALCHEMY_DATABASE_URI'] = db_uri
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
-app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', 'una-clave-secreta-por-defecto-muy-segura')
+app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', 'una-clave-secreta-muy-segura') # CRÍTICO para sesiones
 
 db = SQLAlchemy(app)
 
+# --- CONFIGURACIÓN DE FLASK-LOGIN (NUEVO) ---
+login_manager = LoginManager()
+login_manager.init_app(app)
+login_manager.login_view = 'index' # Redirige a '/' si se intenta acceder a una pág. protegida
+login_manager.login_message = "Por favor, inicia sesión para acceder."
+login_manager.login_message_category = "info"
+
+@login_manager.user_loader
+def load_user(user_id):
+    """Función requerida por Flask-Login para cargar un usuario desde la sesión."""
+    return User.query.get(int(user_id))
+
 # --- MODELOS DE LA BASE DE DATOS ---
-class User(db.Model):
+
+# UserMixin añade los métodos requeridos por Flask-Login (is_authenticated, etc.)
+class User(db.Model, UserMixin): 
     __tablename__ = 'users'
     id = db.Column(db.Integer, primary_key=True)
     username = db.Column(db.String(80), unique=True, nullable=False)
     password = db.Column(db.String(256), nullable=False)
     name = db.Column(db.String(120), nullable=False)
-    role = db.Column(db.String(80), nullable=False)
+    role = db.Column(db.String(80), nullable=False) # "Admin" o "Soporte"
 
 class BotRole(db.Model):
     __tablename__ = 'bot_roles'
@@ -66,8 +81,11 @@ class BotRole(db.Model):
     status = db.Column(db.String(20), default='Activo', nullable=False)
     chats_received = db.Column(db.Integer, default=0)
     chats_pending = db.Column(db.Integer, default=0)
-    assignee = db.relationship('User', backref='assigned_roles')
-    conversations = db.relationship('Conversation', back_populates='bot_role') # Relación con Conversation
+    
+    # Esta relación ahora es 'assignee' (el usuario asignado)
+    assignee = db.relationship('User', backref='assigned_roles') # 'assigned_roles' nos da los roles de un usuario
+    
+    conversations = db.relationship('Conversation', back_populates='bot_role')
 
 class BotConfig(db.Model):
     __tablename__ = 'bot_config'
@@ -76,20 +94,16 @@ class BotConfig(db.Model):
     whatsapp_number = db.Column(db.String(50), nullable=True)
     welcome_message = db.Column(db.Text, nullable=True)
 
-# --- NUEVOS MODELOS PARA CHAT ---
 class Conversation(db.Model):
     __tablename__ = 'conversations'
     id = db.Column(db.Integer, primary_key=True)
-    user_phone = db.Column(db.String(50), nullable=False, index=True) # ej: 'whatsapp:+57314...'
-    status = db.Column(db.String(20), default='open', nullable=False, index=True) # 'open', 'closed'
+    user_phone = db.Column(db.String(50), nullable=False, index=True)
+    status = db.Column(db.String(20), default='open', nullable=False, index=True)
     created_at = db.Column(db.DateTime(timezone=True), server_default=func.now())
     updated_at = db.Column(db.DateTime(timezone=True), onupdate=func.now())
     unread_count = db.Column(db.Integer, default=0)
-    
-    # A qué rol está asignada esta conversación
     bot_role_id = db.Column(db.Integer, db.ForeignKey('bot_roles.id'), nullable=False)
     bot_role = db.relationship('BotRole', back_populates='conversations')
-    
     messages = db.relationship('Message', back_populates='conversation', cascade="all, delete-orphan", order_by='Message.timestamp')
 
     def get_last_message(self):
@@ -101,53 +115,87 @@ class Message(db.Model):
     __tablename__ = 'messages'
     id = db.Column(db.Integer, primary_key=True)
     conversation_id = db.Column(db.Integer, db.ForeignKey('conversations.id'), nullable=False)
-    sender_type = db.Column(db.String(20), nullable=False) # 'user' (cliente) o 'agent' (tu equipo)
+    sender_type = db.Column(db.String(20), nullable=False)
     content = db.Column(db.Text, nullable=False)
     timestamp = db.Column(db.DateTime(timezone=True), server_default=func.now())
-    
     conversation = db.relationship('Conversation', back_populates='messages')
 
-# --- RUTAS BÁSICAS (Sin cambios) ---
+# --- RUTAS BÁSICAS (PROTEGIDAS) ---
 @app.route('/')
 def index():
     return render_template('Index.html')
 
 @app.route('/menu_admin')
+@login_required # Proteger ruta
 def menu_admin():
+    if current_user.role != 'Admin':
+        return redirect(url_for('menu_soporte'))
     return render_template('Menu.html')
 
 @app.route('/menu_soporte')
+@login_required # Proteger ruta
 def menu_soporte():
-    # Esta ruta ahora RENDERIZA el menú, permitiéndole usar url_for
+    if current_user.role != 'Soporte':
+        return redirect(url_for('menu_admin'))
     return render_template('Menu_Soporte.html')
 
 @app.route('/page/<path:page_name>')
+@login_required # Proteger todas las subpáginas
 def show_page(page_name):
     if not page_name.endswith('.html'):
         return "Not Found", 404
-    # Esta ruta sirve todas las páginas del dashboard
+    
+    # Seguridad extra: un 'Soporte' no puede pedir páginas de 'Admin'
+    admin_pages = ['Bot.html', 'Usuarios.html', 'Configuracion.html', 'Dashboard.html']
+    if current_user.role == 'Soporte' and page_name in admin_pages:
+        return redirect(url_for('menu_soporte'))
+
     return render_template(page_name)
 
-# --- APIS DE LOGIN, USUARIOS, ROLES, CONFIG (Sin cambios) ---
-# ... (Omitidas por brevedad, son idénticas a tu archivo) ...
+# --- API DE LOGIN Y LOGOUT ---
 @app.route('/api/login', methods=['POST'])
 def login():
     data = request.get_json()
     username = data.get('username')
     password = data.get('password')
     user = User.query.filter_by(username=username).first()
-    if user and user.password == password:
+    
+    if user and user.password == password: # Idealmente, usar hashing
+        login_user(user) # <-- ¡Magia de Flask-Login! Inicia la sesión.
         redirect_url = url_for('menu_admin' if user.role == 'Admin' else 'menu_soporte')
         return jsonify({"success": True, "redirect_url": redirect_url})
+    
     return jsonify({"success": False, "message": "Usuario o contraseña incorrectos"}), 401
 
+@app.route('/api/logout', methods=['POST'])
+@login_required # Solo un usuario logueado puede desloguearse
+def logout():
+    logout_user() # <-- Cierra la sesión
+    return jsonify({"success": True, "redirect_url": url_for('index')})
+
+
+# --- APIS DE ADMIN (PROTEGIDAS) ---
+def check_admin():
+    """Función helper para verificar si el usuario es Admin."""
+    if current_user.role != 'Admin':
+        return jsonify({"error": "No autorizado"}), 403
+    return None
+
 @app.route('/api/users', methods=['GET'])
+@login_required
 def get_users():
+    admin_check = check_admin()
+    if admin_check: return admin_check
+    
     users = User.query.all()
     return jsonify([{'id': user.id, 'name': user.name, 'role': user.role, 'username': user.username} for user in users])
 
 @app.route('/api/users', methods=['POST'])
+@login_required
 def add_user():
+    admin_check = check_admin()
+    if admin_check: return admin_check
+    
     data = request.get_json()
     username = data.get('username')
     if not username:
@@ -165,7 +213,11 @@ def add_user():
     return jsonify({'id': new_user.id, 'name': new_user.name, 'role': new_user.role, 'username': new_user.username}), 201
 
 @app.route('/api/users/<int:id>', methods=['PUT'])
+@login_required
 def update_user(id):
+    admin_check = check_admin()
+    if admin_check: return admin_check
+    
     user = User.query.get_or_404(id)
     data = request.get_json()
     user.name = data.get('name', user.name)
@@ -176,19 +228,31 @@ def update_user(id):
     return jsonify({'message': 'Usuario actualizado correctamente'})
 
 @app.route('/api/users/<int:id>', methods=['DELETE'])
+@login_required
 def delete_user(id):
+    admin_check = check_admin()
+    if admin_check: return admin_check
+    
     user = User.query.get_or_404(id)
     db.session.delete(user)
     db.session.commit()
     return jsonify({'message': 'Usuario eliminado correctamente'})
 
 @app.route('/api/bot_roles', methods=['GET'])
+@login_required
 def get_bot_roles():
+    admin_check = check_admin()
+    if admin_check: return admin_check
+    
     roles = BotRole.query.options(db.joinedload(BotRole.assignee)).all()
     return jsonify([{'id': role.id, 'title': role.title, 'knowledge_base': role.knowledge_base, 'assignee_name': role.assignee.name if role.assignee else 'Sin Asignar', 'assignee_id': role.assignee_id, 'status': role.status, 'chats_received': role.chats_received, 'chats_pending': role.chats_pending} for role in roles])
 
 @app.route('/api/bot_roles', methods=['POST'])
+@login_required
 def add_bot_role():
+    admin_check = check_admin()
+    if admin_check: return admin_check
+    
     data = request.get_json()
     if BotRole.query.filter_by(title=data['title']).first():
         return jsonify({'message': 'Un rol con este título ya existe'}), 409
@@ -200,7 +264,11 @@ def add_bot_role():
     return jsonify({'id': role_data.id, 'title': role_data.title, 'knowledge_base': role_data.knowledge_base, 'assignee_name': role_data.assignee.name if role_data.assignee else 'Sin Asignar', 'assignee_id': role_data.assignee_id, 'status': role_data.status, 'chats_received': role_data.chats_received, 'chats_pending': role_data.chats_pending}), 201
 
 @app.route('/api/bot_roles/<int:id>', methods=['PUT'])
+@login_required
 def update_bot_role(id):
+    admin_check = check_admin()
+    if admin_check: return admin_check
+    
     role = BotRole.query.get_or_404(id)
     data = request.get_json()
     role.title = data.get('title', role.title)
@@ -212,23 +280,37 @@ def update_bot_role(id):
     return jsonify({'message': 'Rol del bot actualizado correctamente'})
 
 @app.route('/api/bot_roles/<int:id>', methods=['DELETE'])
+@login_required
 def delete_bot_role(id):
+    admin_check = check_admin()
+    if admin_check: return admin_check
+    
     role = BotRole.query.get_or_404(id)
     db.session.delete(role)
     db.session.commit()
     return jsonify({'message': 'Rol del bot eliminado correctamente'})
 
 @app.route('/api/bot_config', methods=['GET'])
+@login_required
 def get_bot_config():
+    admin_check = check_admin()
+    if admin_check: return admin_check
+    
     config = BotConfig.query.first()
+    # ... (código de creación de config por defecto)
     if not config:
         config = BotConfig(is_active=True, whatsapp_number="+573132217862", welcome_message="¡Hola! Bienvenido a nuestro servicio de atención. ¿En qué puedo ayudarte hoy?")
         db.session.add(config)
         db.session.commit()
     return jsonify({'is_active': config.is_active, 'whatsapp_number': config.whatsapp_number, 'welcome_message': config.welcome_message})
 
+
 @app.route('/api/bot_config', methods=['PUT'])
+@login_required
 def update_bot_config():
+    admin_check = check_admin()
+    if admin_check: return admin_check
+    
     config = BotConfig.query.first_or_404()
     data = request.get_json()
     config.is_active = data.get('is_active', config.is_active)
@@ -237,7 +319,8 @@ def update_bot_config():
     db.session.commit()
     return jsonify({'message': 'Configuración del bot actualizada correctamente'})
 
-# --- LÓGICA DEL WEBHOOK DE WHATSAPP (MODIFICADA) ---
+# --- LÓGICA DEL WEBHOOK (PÚBLICO) ---
+# El webhook NO puede estar protegido, ya que Twilio debe poder llamarlo.
 def create_twilio_response(message_text):
     response = MessagingResponse()
     response.message(message_text)
@@ -275,7 +358,7 @@ def get_ai_classification(message_body):
     """
     
     try:
-        model = genai.GenerativeModel('gemini-2.5-flash') # Modelo actualizado
+        model = genai.GenerativeModel('gemini-2.5-flash')
         response = model.generate_content(system_prompt)
         classified_role = response.text.strip().replace("*", "")
         role_titles = [role.title for role in all_roles] + ["General"]
@@ -292,7 +375,7 @@ def get_ai_classification(message_body):
 @app.route('/api/whatsapp/webhook', methods=['POST'])
 def whatsapp_webhook():
     message_body = request.form.get('Body')
-    sender_phone = request.form.get('From') # ej: 'whatsapp:+57314...'
+    sender_phone = request.form.get('From')
     
     if not message_body or not sender_phone:
         logging.warning("Webhook recibido sin 'Body' o 'From'.")
@@ -309,7 +392,7 @@ def whatsapp_webhook():
     
     if role_title == 'General':
         logging.info("Intención 'General' detectada. Enviando saludo.")
-        welcome_message = bot_config.welcome_message or "¡Hola! ¿En qué puedo ayudarte?"
+        welcome_message = bot_config.welcome_message or "¡Hola! ¿En qué puedo ayudarte hoy?"
         response_twiml = create_twilio_response(welcome_message)
         return response_twiml, 200, {'Content-Type': 'application/xml'}
 
@@ -322,19 +405,15 @@ def whatsapp_webhook():
              return ('Error interno del servidor', 500)
 
     try:
-        # --- NUEVA LÓGICA: GUARDAR CHAT ---
-        # 1. Encontrar o crear la conversación
         convo = Conversation.query.filter_by(user_phone=sender_phone, bot_role_id=target_role.id, status='open').first()
         if not convo:
             convo = Conversation(user_phone=sender_phone, bot_role_id=target_role.id, status='open')
             db.session.add(convo)
             logging.info(f"Nueva conversación creada para {sender_phone} en rol {target_role.title}")
 
-        # 2. Guardar el mensaje del usuario
         new_message = Message(conversation=convo, sender_type='user', content=message_body)
         db.session.add(new_message)
         
-        # 3. Actualizar contadores
         target_role.chats_received = (target_role.chats_received or 0) + 1
         target_role.chats_pending = (target_role.chats_pending or 0) + 1
         convo.unread_count = (convo.unread_count or 0) + 1
@@ -352,26 +431,38 @@ def whatsapp_webhook():
         logging.error(f"Error al guardar mensaje o actualizar contadores: {e}")
         return ('Error interno del servidor', 500)
 
-# --- NUEVAS APIS PARA EL FRONTEND DE CHAT ---
+# --- APIS DE CHAT (PROTEGIDAS Y FILTRADAS) ---
 
 @app.route('/api/chats', methods=['GET'])
+@login_required # Proteger
 def get_chats():
     """
-    Obtiene la lista de chats activos para el panel izquierdo de Chats_Generales.
+    Obtiene la lista de chats activos FILTRADA para el usuario logueado.
     """
     try:
-        # Por ahora, obtiene todos los chats abiertos de todos los roles
-        # TODO: Filtrar por rol de usuario logueado
-        open_conversations = Conversation.query.filter_by(status='open').order_by(Conversation.updated_at.desc()).all()
+        open_conversations = []
+        if current_user.role == 'Admin':
+            # El Admin ve todos los chats abiertos
+            open_conversations = Conversation.query.filter_by(status='open').order_by(Conversation.updated_at.desc()).all()
+        else:
+            # El Soporte solo ve los chats de sus roles asignados
+            assigned_role_ids = [role.id for role in current_user.assigned_roles]
+            if assigned_role_ids:
+                open_conversations = Conversation.query.filter(
+                    Conversation.bot_role_id.in_(assigned_role_ids),
+                    Conversation.status == 'open'
+                ).order_by(Conversation.updated_at.desc()).all()
+            else:
+                logging.info(f"Usuario {current_user.username} (Soporte) no tiene roles asignados.")
         
         chat_list = []
         for convo in open_conversations:
             last_msg = convo.get_last_message()
             chat_list.append({
                 "id": convo.id,
-                "name": convo.user_phone.replace('whatsapp:', ''), # Simplifica el número
+                "name": convo.user_phone.replace('whatsapp:', ''),
                 "phone": convo.user_phone.replace('whatsapp:', ''),
-                "time": last_msg.timestamp.strftime("%I:%M %p") if last_msg else 'N/A',
+                "time": last_msg.timestamp.strftime("%I:%M %p") if last_msg and last_msg.timestamp else 'N/A',
                 "unread": convo.unread_count,
                 "last_message": last_msg.content if last_msg else "Sin mensajes"
             })
@@ -381,29 +472,33 @@ def get_chats():
         return jsonify({"error": str(e)}), 500
 
 @app.route('/api/chats/<int:convo_id>/messages', methods=['GET'])
+@login_required # Proteger
 def get_chat_messages(convo_id):
-    """
-    Obtiene todos los mensajes de una conversación específica.
-    """
     convo = Conversation.query.get_or_404(convo_id)
     
-    # Marcar como leído al abrir
+    # Seguridad: El usuario solo puede ver chats de sus roles (o si es Admin)
+    if current_user.role != 'Admin':
+        assigned_role_ids = [role.id for role in current_user.assigned_roles]
+        if convo.bot_role_id not in assigned_role_ids:
+            return jsonify({"error": "No autorizado para ver este chat"}), 403
+            
     convo.unread_count = 0
     db.session.commit()
     
-    messages = [{
-        "sender": msg.sender_type,
-        "text": msg.content
-    } for msg in convo.messages]
-    
+    messages = [{"sender": msg.sender_type, "text": msg.content} for msg in convo.messages]
     return jsonify(messages)
 
 @app.route('/api/chats/<int:convo_id>/messages', methods=['POST'])
+@login_required # Proteger
 def send_chat_message(convo_id):
-    """
-    Permite a un agente enviar un mensaje desde la app web.
-    """
     convo = Conversation.query.get_or_404(convo_id)
+    
+    # Seguridad: El usuario solo puede enviar chats de sus roles (o si es Admin)
+    if current_user.role != 'Admin':
+        assigned_role_ids = [role.id for role in current_user.assigned_roles]
+        if convo.bot_role_id not in assigned_role_ids:
+            return jsonify({"error": "No autorizado para enviar a este chat"}), 403
+
     data = request.get_json()
     content = data.get('text')
 
@@ -414,14 +509,12 @@ def send_chat_message(convo_id):
         return jsonify({"error": "El servicio de envío no está configurado"}), 500
 
     try:
-        # 1. Enviar el mensaje vía Twilio
         twilio_client.messages.create(
             from_=TWILIO_WHATSAPP_NUMBER,
             body=content,
             to=convo.user_phone
         )
         
-        # 2. Guardar el mensaje del agente en la BD
         new_message = Message(
             conversation_id=convo.id,
             sender_type='agent', # 'agent' es el agente de soporte
@@ -439,14 +532,18 @@ def send_chat_message(convo_id):
         return jsonify({"error": str(e)}), 500
 
 @app.route('/api/chats/<int:convo_id>/resolve', methods=['POST'])
+@login_required # Proteger
 def resolve_chat(convo_id):
-    """
-    Cierra o archiva una conversación.
-    """
     convo = Conversation.query.get_or_404(convo_id)
+    
+    # Seguridad: El usuario solo puede resolver chats de sus roles (o si es Admin)
+    if current_user.role != 'Admin':
+        assigned_role_ids = [role.id for role in current_user.assigned_roles]
+        if convo.bot_role_id not in assigned_role_ids:
+            return jsonify({"error": "No autorizado para resolver este chat"}), 403
+            
     try:
         convo.status = 'closed'
-        # Resetear pendientes en el rol si este era el último
         role = convo.bot_role
         if role and role.chats_pending > 0:
              role.chats_pending = role.chats_pending - 1
@@ -457,40 +554,66 @@ def resolve_chat(convo_id):
         db.session.rollback()
         return jsonify({"error": str(e)}), 500
 
-# --- NUEVA API PARA EL DASHBOARD DE SOPORTE ---
+# --- API DE DASHBOARD (PROTEGIDA Y FILTRADA) ---
 @app.route('/api/dashboard/soporte')
+@login_required # Proteger
 def get_soporte_dashboard_data():
     """
-    Proporciona datos reales para Dashboard_Soporte.html
+    Proporciona datos reales para Dashboard_Soporte.html, FILTRADOS por usuario.
     """
     try:
-        # 1. Tarjetas de estadísticas
+        assigned_role_ids = []
+        if current_user.role == 'Admin':
+            # El Admin ve todos los roles
+            assigned_role_ids = [role.id for role in BotRole.query.all()]
+        else:
+            # El Soporte solo ve sus roles
+            assigned_role_ids = [role.id for role in current_user.assigned_roles]
+
+        if not assigned_role_ids:
+            # Si no tiene roles, devuelve data vacía
+            return jsonify({"stats": {"today": 0, "week": 0, "month": 0}, "lineChart": {"labels": [], "data": []}, "barChart": {"labels": [], "data": []}})
+        
         today = datetime.utcnow().date()
         start_of_today = datetime(today.year, today.month, today.day)
         start_of_week = start_of_today - timedelta(days=today.weekday())
         start_of_month = datetime(today.year, today.month, 1)
 
-        messages_today = Message.query.filter(Message.timestamp >= start_of_today).count()
-        messages_week = Message.query.filter(Message.timestamp >= start_of_week).count()
-        messages_month = Message.query.filter(Message.timestamp >= start_of_month).count()
+        # 1. Tarjetas (Filtradas por roles asignados)
+        messages_today = Message.query.join(Conversation).filter(
+            Message.timestamp >= start_of_today,
+            Conversation.bot_role_id.in_(assigned_role_ids)
+        ).count()
+        messages_week = Message.query.join(Conversation).filter(
+            Message.timestamp >= start_of_week,
+            Conversation.bot_role_id.in_(assigned_role_ids)
+        ).count()
+        messages_month = Message.query.join(Conversation).filter(
+            Message.timestamp >= start_of_month,
+            Conversation.bot_role_id.in_(assigned_role_ids)
+        ).count()
 
-        # 2. Gráfico de líneas (últimos 7 días)
+        # 2. Gráfico de líneas (Filtrado)
         labels = []
         data = []
         for i in range(6, -1, -1):
             day = start_of_today - timedelta(days=i)
             next_day = day + timedelta(days=1)
-            count = Message.query.filter(Message.timestamp >= day, Message.timestamp < next_day).count()
-            labels.append(day.strftime("%a")) # 'Lun', 'Mar', ...
+            count = Message.query.join(Conversation).filter(
+                Message.timestamp >= day, 
+                Message.timestamp < next_day,
+                Conversation.bot_role_id.in_(assigned_role_ids)
+            ).count()
+            labels.append(day.strftime("%a"))
             data.append(count)
         
         line_chart = {"labels": labels, "data": data}
 
-        # 3. Gráfico de barras (Motivos/Roles)
-        # Esto agrupa las conversaciones por el rol al que fueron asignadas
+        # 3. Gráfico de barras (Filtrado)
         role_data = db.session.query(
             BotRole.title, func.count(Conversation.id)
         ).join(Conversation, BotRole.id == Conversation.bot_role_id)\
+         .filter(BotRole.id.in_(assigned_role_ids))\
          .group_by(BotRole.title).all()
         
         bar_chart = {
@@ -499,13 +622,8 @@ def get_soporte_dashboard_data():
         }
 
         return jsonify({
-            "stats": {
-                "today": messages_today,
-                "week": messages_week,
-                "month": messages_month
-            },
-            "lineChart": line_chart,
-            "barChart": bar_chart
+            "stats": {"today": messages_today, "week": messages_week, "month": messages_month},
+            "lineChart": line_chart, "barChart": bar_chart
         })
 
     except Exception as e:
@@ -517,9 +635,9 @@ def init_db(app_instance):
     with app_instance.app_context():
         try:
             db.create_all()
-            logging.info("Tablas de la base de datos verificadas/creadas (incluyendo Conversation y Message).")
+            logging.info("Tablas de la base de datos verificadas/creadas.")
             
-            # --- Creación de datos por defecto ---
+            # ... (código de creación de usuarios, config y roles por defecto) ...
             if not User.query.filter_by(role='Admin').first():
                 logging.info("Creando usuario 'admin' por defecto.")
                 db.session.add(User(username='admin', password='admin', name='Administrador', role='Admin'))
@@ -532,7 +650,6 @@ def init_db(app_instance):
                 logging.info("Creando configuración de bot por defecto.")
                 db.session.add(BotConfig(is_active=True, whatsapp_number="+573132217862", welcome_message="¡Hola! Bienvenido a nuestro servicio de atención. ¿En qué puedo ayudarte hoy?"))
             
-            # --- Creación de Roles (Basado en tu screenshot) ---
             roles_default = {
                 "Area Cotizaciones": "Es el cotizador de negocios que permite a cualquier usuario obtener un precio de seguro al instante.",
                 "Renovaciones": "De manera proactiva, este módulo se encarga de mantener a los clientes. Notifica sobre el próximo vencimiento de su póliza.",

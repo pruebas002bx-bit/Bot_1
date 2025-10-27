@@ -147,7 +147,8 @@
 
     <script>
         document.addEventListener('DOMContentLoaded', function() {
-            const navLinks = document.querySelectorAll('.nav-link');
+            const navMenuLinks = document.querySelectorAll('.nav-menu .nav-link');
+            const sidebarLinks = document.querySelectorAll('.sidebar a'); // Todos los links
             const contentFrame = document.getElementById('content-frame');
             const clockTime = document.getElementById('clock-time');
             const clockDate = document.getElementById('clock-date');
@@ -164,22 +165,34 @@
             updateClock();
             setInterval(updateClock, 1000);
 
-            navLinks.forEach(link => {
+            // Manejador de clicks para TODOS los links de la barra lateral
+            sidebarLinks.forEach(link => {
                 link.addEventListener('click', function(e) {
-                    e.preventDefault();
+                    e.preventDefault(); // Prevenir la navegación por defecto
                     
-                    // --- CORRECCIÓN LÓGICA DE NAVEGACIÓN ---
                     const pageUrl = this.getAttribute('data-page');
+                    const href = this.getAttribute('href');
 
                     if (pageUrl) { 
-                        if (this.classList.contains('active')) return; // No recargar si ya está activo
+                        // Es un link de navegación del menú
+                        if (this.classList.contains('active')) return; 
                         
                         contentFrame.src = pageUrl;
-                        document.querySelectorAll('.nav-menu .nav-link').forEach(l => l.classList.remove('active'));
+                        
+                        // Quitar 'active' solo de los links del menú principal
+                        navMenuLinks.forEach(l => l.classList.remove('active'));
                         this.classList.add('active');
-                    } else if (this.getAttribute('href') === "{{ url_for('index') }}") {
-                        // Manejar cierre de sesión
-                        window.location.href = this.getAttribute('href');
+                    
+                    } else if (href === "{{ url_for('index') }}") {
+                        // Es el link de "Cerrar Sesión"
+                        fetch('/api/logout', { method: 'POST' })
+                            .then(res => res.json())
+                            .then(data => {
+                                if(data.success) {
+                                    window.location.href = data.redirect_url; // Redirigir al login
+                                }
+                            })
+                            .catch(err => console.error('Error al cerrar sesión:', err));
                     }
                 });
             });
