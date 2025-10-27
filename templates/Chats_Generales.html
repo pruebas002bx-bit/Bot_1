@@ -4,13 +4,13 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Chats Generales</title>
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="[https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css](https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css)">
     <style>
         /* --- ESTILOS (sin cambios, omitidos por brevedad) --- */
         :root {
             --left-panel-bg: #f0f2f5;
             --right-panel-header-bg: #e9edef;
-            --chat-bg-image: url('https://user-images.githubusercontent.com/15075759/28719144-86dc0f70-73b1-11e7-911d-60d70fcded21.png');
+            --chat-bg-image: url('[https://user-images.githubusercontent.com/15075759/28719144-86dc0f70-73b1-11e7-911d-60d70fcded21.png](https://user-images.githubusercontent.com/15075759/28719144-86dc0f70-73b1-11e7-911d-60d70fcded21.png)');
             --text-primary: #111827;
             --text-secondary: #6b7280;
             --border-color: #d1d8de;
@@ -62,9 +62,8 @@
         .message-bubble { max-width: 60%; padding: 8px 12px; border-radius: 8px; margin-bottom: 5px; line-height: 1.4; box-shadow: 0 1px 1px rgba(0,0,0,0.05); word-wrap: break-word; }
         .sent { background-color: var(--sent-bubble-bg); align-self: flex-end; }
         .received { background-color: var(--received-bubble-bg); align-self: flex-start; }
-        /* --- INICIO CORRECCIÓN: Estilo para mensajes del sistema --- */
+        /* --- ESTILO PARA MENSAJES DEL SISTEMA (E IA) --- */
         .system { background-color: #e2e8f0; color: var(--system-message-color); font-size: 0.8em; align-self: center; padding: 4px 10px; margin-top: 5px; border-radius: 12px; font-style: italic; }
-        /* --- FIN CORRECCIÓN --- */
         .message-input-area { padding: 10px 20px; background: var(--right-panel-header-bg); display: flex; align-items: center; }
         .message-input-area input { flex-grow: 1; padding: 12px 20px; border: none; border-radius: 24px; margin: 0 10px; }
         .message-input-area button { background: var(--accent-color); color: white; border: none; width: 48px; height: 48px; border-radius: 50%; font-size: 1.2em; cursor: pointer; transition: opacity 0.2s; }
@@ -137,7 +136,7 @@ document.addEventListener('DOMContentLoaded', () => {
     let allChats = [];
     let chatDataMap = new Map();
     let pollingInterval = null;
-    const POLLING_RATE_MS = 2000; // Reducido a 2 segundos
+    const POLLING_RATE_MS = 2000;
 
     const chatListEl = document.getElementById('chat-list');
     const chatWindowEl = document.getElementById('chat-window');
@@ -147,12 +146,10 @@ document.addEventListener('DOMContentLoaded', () => {
     const searchInput = document.getElementById('chat-search-input');
     const avatarColors = ['#b91c1c', '#b45309', '#a16207', '#4d7c0f', '#15803d', '#0f766e', '#1d4ed8', '#6d28d9', '#be185d'];
 
-    // --- INICIO CORRECCIÓN: Elementos del Modal de Transferencia ---
     const transferModalEl = document.getElementById('transfer-modal');
     const transferRoleSelect = document.getElementById('transfer-role-select');
     const transferConfirmBtn = document.getElementById('transfer-confirm-btn');
     const transferCancelBtn = document.getElementById('transfer-cancel-btn');
-    // --- FIN CORRECCIÓN ---
 
     const openSuccessModal = (message) => {
         document.getElementById('success-modal-message').textContent = message;
@@ -185,6 +182,9 @@ document.addEventListener('DOMContentLoaded', () => {
             const chatItem = document.createElement('div');
             chatItem.className = `chat-item ${chat.id === activeChatId ? 'active' : ''}`;
             chatItem.dataset.chatId = chat.id;
+            // --- INICIO CORRECCIÓN: Guardar el bot_role_id en el dataset ---
+            chatItem.dataset.roleId = chat.bot_role_id;
+            // --- FIN CORRECCIÓN ---
             chatItem.innerHTML = `
                 <div class="avatar" style="background-color: ${color};">${initials}</div>
                 <div class="chat-info"> <div class="name">${chat.name}</div> <div class="last-message">${chat.last_message}</div> </div>
@@ -205,17 +205,19 @@ document.addEventListener('DOMContentLoaded', () => {
             const messageArea = document.getElementById('message-area');
             if (!messageArea) return;
 
-            // --- INICIO CORRECCIÓN: Renderizar mensajes del sistema ---
+            // --- RENDERIZADO DE MENSAJES (incluye 'system') ---
             messageArea.innerHTML = messages.map(msg => {
                 let bubbleClass = '';
                 if (msg.sender === 'agent') bubbleClass = 'sent';
                 else if (msg.sender === 'user') bubbleClass = 'received';
-                else if (msg.sender === 'system') bubbleClass = 'system'; // Nueva clase
+                else if (msg.sender === 'system') bubbleClass = 'system'; // Mensajes de IA y Sistema
                 return `<div class="message-bubble ${bubbleClass}">${msg.text}</div>`;
             }).join('');
-            // --- FIN CORRECCIÓN ---
+            // --- FIN RENDERIZADO ---
 
-            if (messageArea.scrollHeight - messageArea.scrollTop <= messageArea.clientHeight + 100) {
+            // Auto-scroll solo si el usuario está cerca del final
+            const shouldScroll = messageArea.scrollHeight - messageArea.scrollTop <= messageArea.clientHeight + 200;
+            if (shouldScroll) {
                 messageArea.scrollTop = messageArea.scrollHeight;
             }
         } catch (error) {
@@ -255,7 +257,6 @@ document.addEventListener('DOMContentLoaded', () => {
     };
 
     const archiveActiveChat = async () => {
-        // ... (código sin cambios)
         if (activeChatId === null) return;
         try {
             const response = await fetch(`/api/chats/${activeChatId}/resolve`, { method: 'POST' });
@@ -271,16 +272,12 @@ document.addEventListener('DOMContentLoaded', () => {
     };
 
     // --- INICIO CORRECCIÓN: Funciones para Transferencia ---
-    const populateTransferModal = async () => {
+    const populateTransferModal = async (currentRoleId) => {
         transferRoleSelect.innerHTML = '<option value="">Cargando roles...</option>';
         try {
             const response = await fetch('/api/bot_roles/list');
             if (!response.ok) throw new Error('Error al cargar roles');
             const roles = await response.json();
-
-            // Filtrar el rol actual del chat si es posible
-            const currentChat = chatDataMap.get(activeChatId);
-            const currentRoleId = currentChat?.bot_role_id; // Necesitamos el ID del rol actual
 
             transferRoleSelect.innerHTML = '<option value="">-- Selecciona un rol --</option>';
             roles.forEach(role => {
@@ -292,7 +289,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     transferRoleSelect.appendChild(option);
                 }
             });
-            transferConfirmBtn.disabled = true; // Deshabilitar hasta que se seleccione algo
+            transferConfirmBtn.disabled = true;
 
         } catch (error) {
             console.error(error);
@@ -306,7 +303,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const openTransferModal = () => {
         if (activeChatId === null) return;
-        populateTransferModal(); // Llenar el dropdown
+        // --- INICIO CORRECCIÓN: Obtener el roleId del chat activo ---
+        const currentChat = chatDataMap.get(activeChatId);
+        const currentRoleId = currentChat ? currentChat.bot_role_id : null;
+        // --- FIN CORRECCIÓN ---
+        populateTransferModal(currentRoleId);
         transferModalEl.classList.add('show');
     };
 
@@ -318,7 +319,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const targetRoleId = transferRoleSelect.value;
         if (!targetRoleId || activeChatId === null) return;
 
-        transferConfirmBtn.disabled = true; // Evitar doble click
+        transferConfirmBtn.disabled = true;
         transferConfirmBtn.textContent = 'Transfiriendo...';
 
         try {
@@ -339,7 +340,8 @@ document.addEventListener('DOMContentLoaded', () => {
             await pollChats(true); // Actualizar lista inmediatamente
             renderEmptyState();
 
-        } catch (error) {
+        } catch (error)
+        {
             console.error(error);
             alert(`Error: ${error.message}`);
         } finally {
@@ -353,43 +355,64 @@ document.addEventListener('DOMContentLoaded', () => {
     // --- FIN CORRECCIÓN ---
 
     const pollChats = async (forceListUpdate = false) => {
-        // ... (código sin cambios)
         try {
             const response = await fetch('/api/chats');
             if (!response.ok) {
                 console.error('Error en polling:', response.status);
+                if(response.status === 401) { // Error de autenticación
+                    stopPolling();
+                    alert("Tu sesión ha expirado. Serás redirigido al inicio.");
+                    window.location.href = '/';
+                }
                 return;
             }
             const latestChats = await response.json();
+            
             let listNeedsUpdate = forceListUpdate;
             let activeChatNeedsUpdate = false;
+            
+            // --- INICIO CORRECCIÓN: Usar chatDataMap para rastrear cambios ---
+            const latestChatIds = new Set();
+            
             latestChats.forEach(newChatData => {
+                latestChatIds.add(newChatData.id);
                 const existingChatData = chatDataMap.get(newChatData.id);
+                
+                // Si es nuevo o si se actualizó
                 if (!existingChatData || newChatData.updated_at !== existingChatData.updated_at) {
                     chatDataMap.set(newChatData.id, newChatData);
-                    if (newChatData.id === activeChatId) { activeChatNeedsUpdate = true; }
-                    listNeedsUpdate = true;
+                    if (newChatData.id === activeChatId) { 
+                        activeChatNeedsUpdate = true; // El chat activo tiene nuevos mensajes
+                    }
+                    listNeedsUpdate = true; // La lista (ej: last_message, unread) necesita actualizarse
                 }
             });
-            // Comprobar chats eliminados/resueltos/transferidos que ya no están en la lista del agente
-            const latestChatIds = new Set(latestChats.map(c => c.id));
+
+            // Comprobar chats eliminados/resueltos/transferidos
             let chatRemoved = false;
             for (const existingId of chatDataMap.keys()) {
                 if (!latestChatIds.has(existingId)) {
                     chatDataMap.delete(existingId);
                     listNeedsUpdate = true;
-                    if (existingId === activeChatId) { // Si el chat activo fue removido
+                    if (existingId === activeChatId) { 
                         activeChatId = null;
-                        renderEmptyState(); // Limpiar ventana derecha
+                        renderEmptyState();
                         chatRemoved = true;
                     }
                 }
             }
-            if (chatRemoved) activeChatNeedsUpdate = false; // Ya no hay chat activo que actualizar
+            // --- FIN CORRECCIÓN ---
 
-            allChats = latestChats; // Actualizar la lista local
-            if (listNeedsUpdate) { renderChatList(searchInput.value.trim()); }
-            if (activeChatNeedsUpdate) { fetchMessagesForChat(activeChatId); }
+            if (chatRemoved) activeChatNeedsUpdate = false;
+
+            allChats = Array.from(chatDataMap.values()); // Actualizar la lista local
+            
+            if (listNeedsUpdate) { 
+                renderChatList(searchInput.value.trim()); 
+            }
+            if (activeChatNeedsUpdate) { 
+                fetchMessagesForChat(activeChatId); 
+            }
 
         } catch (error) {
             console.error('Error durante el polling:', error);
@@ -398,7 +421,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const startPolling = () => {
         if (pollingInterval) clearInterval(pollingInterval);
-        pollChats(true);
+        pollChats(true); // Carga inicial
         pollingInterval = setInterval(pollChats, POLLING_RATE_MS);
     };
     const stopPolling = () => {
@@ -422,11 +445,17 @@ document.addEventListener('DOMContentLoaded', () => {
         const chatItem = e.target.closest('.chat-item');
         if (chatItem) {
             const newActiveChatId = parseInt(chatItem.dataset.chatId);
-            if (newActiveChatId === activeChatId) return;
+            if (newActiveChatId === activeChatId) return; // No recargar si ya está activo
+            
             activeChatId = newActiveChatId;
-            allChats.forEach(chat => { if(chat.id === activeChatId) chat.unread = 0; });
-            renderChatList(searchInput.value.trim());
-            renderChatWindow(activeChatId);
+            
+            // Actualizar la UI inmediatamente para marcar como "leído"
+            const chatData = chatDataMap.get(activeChatId);
+            if (chatData) {
+                chatData.unread = 0;
+            }
+            renderChatList(searchInput.value.trim()); // Re-renderizar lista para quitar badge
+            renderChatWindow(activeChatId); // Cargar ventana (esto marcará como leído en backend)
         }
     });
 
@@ -440,9 +469,7 @@ document.addEventListener('DOMContentLoaded', () => {
             e.preventDefault();
             const action = actionLink.dataset.action;
             if (action === 'archive') archiveActiveChat();
-            // --- INICIO CORRECCIÓN: Llamar a abrir modal de transferencia ---
             if (action === 'transfer') openTransferModal();
-            // --- FIN CORRECCIÓN ---
             if (dropdown) dropdown.classList.remove('show');
         } else if (!e.target.closest('.header-actions')) {
             if (dropdown) dropdown.classList.remove('show');
@@ -450,21 +477,24 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     chatWindowEl.addEventListener('submit', async (e) => {
-        // ... (código sin cambios)
         if (e.target.id === 'message-form') {
             e.preventDefault();
             const input = document.getElementById('message-input');
             const messageText = input.value.trim();
             if (messageText && activeChatId !== null) {
+                
                 const messageArea = document.getElementById('message-area');
+                // Crear burbuja temporal
                 const tempBubble = document.createElement('div');
                 tempBubble.className = 'message-bubble sent';
                 tempBubble.textContent = messageText;
-                tempBubble.style.opacity = '0.7';
+                tempBubble.style.opacity = '0.7'; // Indicar que se está enviando
                 messageArea.appendChild(tempBubble);
-                messageArea.scrollTop = messageArea.scrollHeight;
+                messageArea.scrollTop = messageArea.scrollHeight; // Scroll al fondo
+                
                 const messageToSend = input.value;
-                input.value = '';
+                input.value = ''; // Limpiar input inmediatamente
+
                 try {
                     const response = await fetch(`/api/chats/${activeChatId}/messages`, {
                         method: 'POST',
@@ -472,16 +502,22 @@ document.addEventListener('DOMContentLoaded', () => {
                         body: JSON.stringify({ text: messageToSend }),
                     });
                     if (!response.ok) throw new Error('Error al enviar mensaje');
+                    
                     const result = await response.json();
-                    tempBubble.textContent = result.message.text;
-                    tempBubble.style.opacity = '1';
-                    await pollChats(true); // Forzar actualización de lista
+                    
+                    // Actualizar burbuja temporal
+                    tempBubble.textContent = result.message.text; // (No debería cambiar, pero es buena práctica)
+                    tempBubble.style.opacity = '1'; // Confirmar envío
+                    
+                    // Actualizar la lista de chats (para 'last_message')
+                    await pollChats(true); 
+                    
                 } catch (error) {
                     console.error(error);
                     tempBubble.textContent += ' (Error al enviar)';
                     tempBubble.style.backgroundColor = '#fee2e2';
                     tempBubble.style.color = '#991b1b';
-                    input.value = messageText;
+                    input.value = messageText; // Devolver texto al input si falla
                 }
             }
         }
@@ -490,6 +526,14 @@ document.addEventListener('DOMContentLoaded', () => {
     renderEmptyState();
     startPolling();
     window.addEventListener('beforeunload', stopPolling);
+    
+    // Ocultar dropdown si se hace clic fuera
+    document.addEventListener('click', (e) => {
+        if (!chatWindowEl.contains(e.target)) {
+            const dropdown = document.getElementById('actions-dropdown');
+            if (dropdown) dropdown.classList.remove('show');
+        }
+    });
 });
 </script>
 </body>

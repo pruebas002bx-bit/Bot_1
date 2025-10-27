@@ -1,6 +1,7 @@
 import os
 import logging
-import re
+import re  # <--- CORRECCIÓN: Añadido
+import json  # <--- CORRECCIÓN: Añadido
 from flask import Flask, render_template, request, jsonify, redirect, url_for
 from flask_sqlalchemy import SQLAlchemy
 from dotenv import load_dotenv
@@ -94,14 +95,15 @@ class Conversation(db.Model):
     __tablename__ = 'conversations'
     id = db.Column(db.Integer, primary_key=True)
     user_phone = db.Column(db.String(50), nullable=False, index=True)
-    status = db.Column(db.String(20), default='open', nullable=False, index=True) # 'open', 'closed'
+    # --- CORRECCIÓN: El estado 'ia_greeting' se maneja aquí ---
+    status = db.Column(db.String(20), default='ia_greeting', nullable=False, index=True) # 'ia_greeting', 'open', 'closed'
     created_at = db.Column(db.DateTime(timezone=True), server_default=func.now())
     updated_at = db.Column(db.DateTime(timezone=True), onupdate=func.now())
     unread_count = db.Column(db.Integer, default=0)
     bot_role_id = db.Column(db.Integer, db.ForeignKey('bot_roles.id'), nullable=False)
     bot_role = db.relationship('BotRole', back_populates='conversations')
     messages = db.relationship('Message', back_populates='conversation', cascade="all, delete-orphan", order_by='Message.timestamp')
-    pending_counted = db.Column(db.Boolean, default=True) # Flag para saber si ya incrementó/decrementó pending
+    pending_counted = db.Column(db.Boolean, default=False) # Flag para saber si ya incrementó/decrementó pending
 
     def get_last_message(self):
         if self.messages:
@@ -175,21 +177,27 @@ def get_users():
 @app.route('/api/users', methods=['POST'])
 @login_required
 def add_user():
-    # ... (código sin cambios)
     admin_check = check_admin()
     if admin_check: return admin_check
     data = request.get_json()
-    username = data.get('username')
-    if not username:
-        base_username = data.get('name', 'usuario').split(' ')[0].lower().strip()
-        username = base_username
-        counter = 1
-        while User.query.filter_by(username=username).first():
-            username = f"{base_username}{counter}"
-            counter += 1
+    # Generar username automáticamente si no se provee
+    base_username = re.sub(r'\s+', '', data.get('name', 'usuario')).split(' ')[0].lower().strip()
+    if not base_username: base_username = 'usuario'
+    username = base_username
+    counter = 1
+    while User.query.filter_by(username=username).first():
+        username = f"{base_username}{counter}"
+        counter += 1
+            
     if User.query.filter_by(username=username).first():
         return jsonify({'message': 'El nombre de usuario ya existe'}), 409
-    new_user = User(username=username, name=data['name'], password=data['password'], role=data['role'])
+    
+    new_user = User(
+        username=username, 
+        name=data['name'], 
+        password=data['password'], 
+        role=data['role']
+    )
     db.session.add(new_user)
     db.session.commit()
     return jsonify({'id': new_user.id, 'name': new_user.name, 'role': new_user.role, 'username': new_user.username}), 201
@@ -197,7 +205,6 @@ def add_user():
 @app.route('/api/users/<int:id>', methods=['PUT'])
 @login_required
 def update_user(id):
-    # ... (código sin cambios)
     admin_check = check_admin()
     if admin_check: return admin_check
     user = User.query.get_or_404(id)
@@ -212,7 +219,6 @@ def update_user(id):
 @app.route('/api/users/<int:id>', methods=['DELETE'])
 @login_required
 def delete_user(id):
-    # ... (código sin cambios)
     admin_check = check_admin()
     if admin_check: return admin_check
     user = User.query.get_or_404(id)
@@ -232,24 +238,19 @@ def get_bot_roles():
                      'chats_received': r.chats_received or 0, 'chats_pending': r.chats_pending or 0,
                      'chats_resolved': r.chats_resolved or 0} for r in roles])
 
-# --- INICIO CORRECCIÓN: Nueva API para listar roles (para dropdown) ---
 @app.route('/api/bot_roles/list', methods=['GET'])
-@login_required # Solo usuarios logueados pueden ver la lista
+@login_required
 def get_bot_roles_list():
-    """Devuelve una lista simple de roles activos (id, title) para dropdowns."""
     try:
-        # Excluir el rol 'General' de las opciones de transferencia? Opcional.
         roles = BotRole.query.filter(BotRole.status == 'Activo', BotRole.title != 'General').order_by(BotRole.title).all()
         return jsonify([{'id': r.id, 'title': r.title} for r in roles])
     except Exception as e:
         logging.error(f"Error en /api/bot_roles/list: {e}")
         return jsonify({"error": str(e)}), 500
-# --- FIN CORRECCIÓN ---
 
 @app.route('/api/bot_roles', methods=['POST'])
 @login_required
 def add_bot_role():
-    # ... (código sin cambios, ya devuelve chats_resolved)
     admin_check = check_admin()
     if admin_check: return admin_check
     data = request.get_json()
@@ -268,11 +269,9 @@ def add_bot_role():
                     'chats_pending': role_data.chats_pending or 0,
                     'chats_resolved': role_data.chats_resolved or 0}), 201
 
-
 @app.route('/api/bot_roles/<int:id>', methods=['PUT'])
 @login_required
 def update_bot_role(id):
-    # ... (código sin cambios)
     admin_check = check_admin()
     if admin_check: return admin_check
     role = BotRole.query.get_or_404(id)
@@ -288,7 +287,6 @@ def update_bot_role(id):
 @app.route('/api/bot_roles/<int:id>', methods=['DELETE'])
 @login_required
 def delete_bot_role(id):
-    # ... (código sin cambios)
     admin_check = check_admin()
     if admin_check: return admin_check
     role = BotRole.query.get_or_404(id)
@@ -299,7 +297,6 @@ def delete_bot_role(id):
 @app.route('/api/bot_config', methods=['GET'])
 @login_required
 def get_bot_config():
-    # ... (código sin cambios)
     admin_check = check_admin()
     if admin_check: return admin_check
     config = BotConfig.query.first()
@@ -312,7 +309,6 @@ def get_bot_config():
 @app.route('/api/bot_config', methods=['PUT'])
 @login_required
 def update_bot_config():
-    # ... (código sin cambios)
     admin_check = check_admin()
     if admin_check: return admin_check
     config = BotConfig.query.first_or_404()
@@ -329,52 +325,114 @@ def create_twilio_response(message_text):
     response.message(message_text)
     return str(response)
 
-def get_ai_classification(message_body):
-    # ... (código sin cambios)
-    logging.info("Iniciando clasificación con IA...")
+# --- INICIO CORRECCIÓN: Nueva función de IA Conversacional ---
+def get_ia_response_and_route(messages_list):
+    """
+    Gestiona la conversación con Gemini.
+    Decide si chatear más o enrutar.
+    """
+    logging.info("Iniciando IA conversacional (get_ia_response_and_route)...")
     if not genai:
         logging.error("Módulo de IA (Gemini) no está configurado.")
-        return "General"
+        # Fallback: enrutar directamente a 'General' si la IA falla
+        return ("route", "General") 
+
     try:
-        all_roles = BotRole.query.filter_by(status='Activo').all()
-    except Exception as e:
-        logging.error(f"Error al consultar roles en la BD: {e}")
-        return "General"
-    if not all_roles:
-        logging.error("No hay roles activos en la base de datos para clasificar.")
-        return "General"
-    prompt_roles = ""
-    for role in all_roles:
-        prompt_roles += f"- Título: {role.title}\n  Descripción: {role.knowledge_base}\n"
-    prompt_roles += "- Título: General\n  Descripción: Para saludos iniciales (hola, buenos días), despedidas o cualquier consulta que no encaje claramente en las otras categorías.\n"
-    system_prompt = f"""
-    Eres un enrutador de soporte al cliente. Tu tarea es clasificar el mensaje de un usuario en una de las siguientes categorías.
-    Lee la descripción de cada rol y la base de conocimiento para tomar tu decisión.
-    Responde *únicamente* con el Título exacto de la categoría que mejor coincida.
-    Categorías Disponibles:
-    {prompt_roles}
-    Mensaje del Usuario:
-    "{message_body}"
-    Categoría:
-    """
-    try:
-        model = genai.GenerativeModel('gemini-2.5-flash')
-        response = model.generate_content(system_prompt)
-        classified_role = response.text.strip().replace("*", "")
-        role_titles = [role.title for role in all_roles] + ["General"]
-        if classified_role in role_titles:
-            logging.info(f"IA clasificó el mensaje como: '{classified_role}'")
-            return classified_role
-        else:
-            logging.warning(f"IA devolvió un rol no válido: '{classified_role}'. Usando 'General'.")
-            return "General"
+        # Obtener roles (excluyendo 'General' ya que es el enrutador)
+        all_roles = BotRole.query.filter(BotRole.status == 'Activo', BotRole.title != 'General').all()
+        if not all_roles:
+            logging.error("No hay roles (aparte de 'General') activos en la BD para enrutar.")
+            return ("chat", "¡Hola! Soy Montenegro, tu asistente virtual de Seguros Montenegro. Actualmente todos nuestros departamentos están ocupados, pero déjame tu consulta y te atenderemos lo antes posible.")
+
+        prompt_roles = ""
+        for role in all_roles:
+            prompt_roles += f"- Título: {role.title}\n  Descripción: {role.knowledge_base}\n"
+
+        system_prompt = f"""
+        Eres 'Montenegro', un asistente virtual experto de Seguros Montenegro.
+        Tu objetivo es entender la necesidad del cliente y, *solo cuando estés seguro de su intención*, clasificarla en uno de los roles disponibles.
+        Si no estás seguro, *debes* hacer preguntas de aclaración.
+
+        Roles Disponibles para enrutar:
+        {prompt_roles}
+
+        Reglas de Conversación:
+        1.  Para el primer mensaje del usuario: Preséntate *siempre* como "¡Hola! Soy Montenegro, tu asistente virtual de Seguros Montenegro." y luego añade tu pregunta o respuesta.
+        2.  Ejemplo de primer mensaje (Usuario: "info"): "¡Hola! Soy Montenegro, tu asistente virtual de Seguros Montenegro. ¿En qué puedo ayudarte hoy?"
+        3.  Ejemplo de primer mensaje (Usuario: "quiero comprar"): "¡Hola! Soy Montenegro, tu asistente virtual de Seguros Montenegro. ¡Claro! ¿Te refieres a comprar un seguro nuevo o a gestionar una renovación?"
+        4.  Si la intención del usuario es ambigua (ej: 'quiero comprar'), ofrece opciones (ej: 'Claro, ¿te refieres a un seguro nuevo o a una renovación?').
+        5.  Antes de enrutar, *siempre* confirma la intención (ej: El usuario dice 'renovación'. Tú respondes: 'Entendido, ¿puedes confirmarme que deseas gestionar una renovación?').
+        6.  Si el cliente confirma ('sí', 'correcto', 'eso es'), responde *únicamente* con el JSON:
+            {{"action": "route", "role_title": "[Título del Rol]"}}
+        7.  Si el cliente niega la confirmación ('no', 'no es eso'), pide más detalles (ej: 'Entendido. ¿Podrías describirme mejor lo que necesitas?').
+        8.  Para cualquier otra respuesta (saludos, aclaraciones, negaciones), responde *únicamente* con el JSON:
+            {{"action": "chat", "response_message": "[Tu respuesta o pregunta]"}}
+
+        Historial de Conversación (último mensaje es del usuario):
+        """
+
+        # Formatear el historial para el prompt
+        chat_history_for_prompt = []
+        for msg in messages_list:
+            if msg.sender_type == 'user':
+                # Usar 'Usuario' para el prompt
+                chat_history_for_prompt.append(f"Usuario: {msg.content}")
+            elif msg.sender_type == 'system':
+                # Usar 'Montenegro' para los mensajes del bot en el prompt
+                chat_history_for_prompt.append(f"Montenegro: {msg.content}")
+        
+        final_prompt = system_prompt + "\n".join(chat_history_for_prompt)
+
+        logging.info(f"Enviando prompt a Gemini 2.5-flash...")
+        model = genai.GenerativeModel('gemini-2.5-flash') # Usando el modelo solicitado
+        response = model.generate_content(final_prompt)
+        
+        response_text = response.text.strip()
+        logging.info(f"Respuesta de Gemini: {response_text}")
+
+        # Intentar parsear JSON
+        try:
+            # Limpiar si Gemini añade '```json\n...\n```'
+            if response_text.startswith("```json"):
+                response_text = re.sub(r"```json\n(.*?)\n```", r"\1", response_text, flags=re.DOTALL)
+            
+            data = json.loads(response_text)
+            action = data.get("action")
+            
+            if action == "route":
+                role_title = data.get("role_title")
+                role_titles = [role.title for role in all_roles]
+                if role_title in role_titles:
+                    logging.info(f"IA decidió ENRUTAR a: '{role_title}'")
+                    return ("route", role_title)
+                else:
+                    logging.warning(f"IA intentó enrutar a rol inválido: '{role_title}'. Pidiendo aclaración.")
+                    return ("chat", "Entendido, pero no estoy seguro de a qué departamento transferirte. ¿Podrías ser más específico?")
+
+            elif action == "chat":
+                message = data.get("response_message")
+                logging.info(f"IA decidió CHATEAR: '{message}'")
+                return ("chat", message)
+            
+            else:
+                raise ValueError("JSON de IA no tiene 'action' válido.")
+
+        except (json.JSONDecodeError, ValueError, TypeError) as e:
+            logging.warning(f"Respuesta de Gemini no fue JSON válido ({e}). Tratando como chat: {response_text}")
+            clean_response = response_text.replace("*", "").strip()
+            if not clean_response:
+                clean_response = "No estoy seguro de cómo responder a eso. ¿Puedes reformularlo?"
+            return ("chat", clean_response)
+
     except Exception as e:
         logging.error(f"Error en la llamada a la API de Gemini: {e}")
-        return "General"
+        return ("chat", "Estoy teniendo problemas técnicos. Por favor, espera un momento.")
+# --- FIN CORRECCIÓN: Nueva función de IA ---
 
+
+# --- INICIO CORRECCIÓN: Webhook reescrito para IA conversacional ---
 @app.route('/api/whatsapp/webhook', methods=['POST'])
 def whatsapp_webhook():
-    # ... (código sin cambios)
     message_body = request.form.get('Body')
     sender_phone = request.form.get('From')
     if not message_body or not sender_phone:
@@ -383,9 +441,12 @@ def whatsapp_webhook():
     logging.info(f"Mensaje recibido de {sender_phone}: {message_body}")
 
     try:
-        existing_convo = Conversation.query.filter_by(user_phone=sender_phone, status='open').first()
-        if existing_convo:
-            logging.info(f"Conversación abierta (ID: {existing_convo.id}) encontrada para {sender_phone}. Omitiendo IA.")
+        # Buscar la conversación más reciente con este número
+        existing_convo = Conversation.query.filter_by(user_phone=sender_phone).order_by(Conversation.created_at.desc()).first()
+
+        # Escenario A: Chat abierto y asignado a un humano
+        if existing_convo and existing_convo.status == 'open':
+            logging.info(f"Conversación ABIERTA (ID: {existing_convo.id}) encontrada para {sender_phone}. Enviando a agente.")
             new_message = Message(conversation_id=existing_convo.id, sender_type='user', content=message_body)
             db.session.add(new_message)
             existing_convo.unread_count = (existing_convo.unread_count or 0) + 1
@@ -395,73 +456,153 @@ def whatsapp_webhook():
                 role.chats_pending = (role.chats_pending or 0) + 1
                 existing_convo.pending_counted = True
             db.session.commit()
+            return ('', 200) # Twilio recibe 200 OK, no envía respuesta
+
+        bot_config = BotConfig.query.first()
+        if not bot_config or not bot_config.is_active:
+            logging.info("Bot inactivo. Ignorando mensaje.")
             return ('', 200)
-    except Exception as e:
-        db.session.rollback()
-        logging.error(f"Error al buscar/guardar en conversación existente: {e}")
-        return ('Error interno del servidor', 500)
 
-    logging.info(f"No hay conversación abierta para {sender_phone}. Pasando a IA.")
-    bot_config = BotConfig.query.first()
-    if not bot_config or not bot_config.is_active:
-        logging.info("Bot inactivo. Ignorando mensaje.")
-        return ('', 200)
+        # Escenario B: Chat en fase de saludo/IA ('ia_greeting')
+        if existing_convo and existing_convo.status == 'ia_greeting':
+            logging.info(f"Continuando chat IA (ID: {existing_convo.id}) para {sender_phone}.")
+            convo = existing_convo
+            # Añadir mensaje del usuario a la BD
+            user_msg = Message(conversation_id=convo.id, sender_type='user', content=message_body)
+            db.session.add(user_msg)
+            
+            # Obtener historial para la IA (incluyendo el nuevo mensaje)
+            # Recargamos convo.messages para incluir el que acabamos de añadir
+            messages_history = Message.query.filter_by(conversation_id=convo.id).order_by(Message.timestamp).all()
+            
+            # Llamar a la IA
+            action, data = get_ia_response_and_route(messages_history)
+            
+            if action == "route":
+                role_title = data
+                target_role = BotRole.query.filter_by(title=role_title, status='Activo').first()
+                
+                if not target_role:
+                    logging.error(f"IA enrutó a '{role_title}' pero no se encontró o está inactivo.")
+                    ia_response_msg = f"Ups, el departamento de '{role_title}' no está disponible en este momento. ¿Puedo ayudarte con algo más?"
+                    response_twiml = create_twilio_response(ia_response_msg)
+                    ia_msg_db = Message(conversation_id=convo.id, sender_type='system', content=ia_response_msg)
+                    db.session.add(ia_msg_db)
+                    db.session.commit()
+                    return str(response_twiml), 200, {'Content-Type': 'application/xml'}
+                
+                # --- Enrutamiento Exitoso ---
+                logging.info(f"IA enrutó chat {convo.id} a '{target_role.title}'. Cambiando status a 'open'.")
+                convo.status = 'open'
+                convo.bot_role_id = target_role.id
+                convo.pending_counted = True
+                convo.updated_at = datetime.utcnow()
+                
+                target_role.chats_received = (target_role.chats_received or 0) + 1
+                target_role.chats_pending = (target_role.chats_pending or 0) + 1
 
-    role_title = get_ai_classification(message_body)
-    if role_title == 'General':
-        logging.info("Intención 'General' detectada. Enviando saludo.")
-        welcome_message = bot_config.welcome_message or "¡Hola! ¿En qué puedo ayudarte hoy?"
-        response_twiml = create_twilio_response(welcome_message)
-        return response_twiml, 200, {'Content-Type': 'application/xml'}
+                transfer_message = f"¡Entendido! Un agente del área de {target_role.title} te atenderá pronto."
+                response_twiml = create_twilio_response(transfer_message)
+                
+                # Mensaje de sistema (para el agente)
+                system_msg_db = Message(conversation_id=convo.id, sender_type='system', content=f"Chat enrutado por IA a {target_role.title}.")
+                # Mensaje de IA (para el usuario, guardado como 'system' para el historial del agente)
+                ia_msg_db = Message(conversation_id=convo.id, sender_type='system', content=transfer_message)
+                db.session.add_all([system_msg_db, ia_msg_db])
+                db.session.commit()
+                
+                return str(response_twiml), 200, {'Content-Type': 'application/xml'}
 
-    target_role = BotRole.query.filter_by(title=role_title).first()
-    if not target_role:
-        logging.warning(f"IA devolvió '{role_title}' pero no se encontró en BD. Asignando a 'General'.")
-        target_role = BotRole.query.filter_by(title='General').first()
-        if not target_role:
-             logging.error("CRÍTICO: No se encontró el rol específico ni un rol 'General'.")
+            elif action == "chat":
+                # --- IA Sigue Chateando ---
+                ia_response_msg = data
+                response_twiml = create_twilio_response(ia_response_msg)
+                ia_msg_db = Message(conversation_id=convo.id, sender_type='system', content=ia_response_msg) # Guardado como 'system'
+                db.session.add(ia_msg_db)
+                convo.updated_at = datetime.utcnow()
+                db.session.commit()
+                return str(response_twiml), 200, {'Content-Type': 'application/xml'}
+        
+        # Escenario C: Conversación nueva (o 'closed')
+        logging.info(f"No hay conversación activa para {sender_phone}. Creando nueva conversación IA.")
+        
+        general_role = BotRole.query.filter_by(title='General').first()
+        if not general_role:
+             logging.error("CRÍTICO: No se encontró el rol 'General' para iniciar chats IA.")
              return ('Error interno del servidor', 500)
 
-    try:
-        convo = Conversation(user_phone=sender_phone, bot_role_id=target_role.id, status='open', pending_counted=True)
+        convo = Conversation(user_phone=sender_phone, bot_role_id=general_role.id, status='ia_greeting')
         db.session.add(convo)
-        db.session.flush()
-        new_message = Message(conversation_id=convo.id, sender_type='user', content=message_body)
-        db.session.add(new_message)
-        target_role.chats_received = (target_role.chats_received or 0) + 1
-        target_role.chats_pending = (target_role.chats_pending or 0) + 1
-        convo.unread_count = 1
+        db.session.flush() # Para obtener el convo.id
+
+        user_msg = Message(conversation_id=convo.id, sender_type='user', content=message_body)
+        db.session.add(user_msg)
+        
+        # Llamar a la IA solo con el primer mensaje
+        action, data = get_ia_response_and_route([user_msg])
+
+        if action == "route": # Improbable en el primer mensaje, pero posible
+            role_title = data
+            target_role = BotRole.query.filter_by(title=role_title, status='Activo').first()
+            if target_role:
+                logging.info(f"IA enrutó chat {convo.id} INMEDIATAMENTE a '{target_role.title}'.")
+                convo.status = 'open'
+                convo.bot_role_id = target_role.id
+                convo.pending_counted = True
+                target_role.chats_received = (target_role.chats_received or 0) + 1
+                target_role.chats_pending = (target_role.chats_pending or 0) + 1
+                
+                transfer_message = f"¡Entendido! Un agente del área de {target_role.title} te atenderá pronto."
+                response_twiml = create_twilio_response(transfer_message)
+                
+                system_msg_db = Message(conversation_id=convo.id, sender_type='system', content=f"Chat enrutado por IA a {target_role.title}.")
+                ia_msg_db = Message(conversation_id=convo.id, sender_type='system', content=transfer_message)
+                db.session.add_all([system_msg_db, ia_msg_db])
+            else:
+                # Fallback si el rol no existe
+                action = "chat"
+                data = "¡Hola! Soy Montenegro, tu asistente virtual de Seguros Montenegro. ¿En qué puedo ayudarte hoy?"
+        
+        if action == "chat":
+            ia_response_msg = data
+            response_twiml = create_twilio_response(ia_response_msg)
+            ia_msg_db = Message(conversation_id=convo.id, sender_type='system', content=ia_response_msg)
+            db.session.add(ia_msg_db)
+        
         convo.updated_at = datetime.utcnow()
         db.session.commit()
-        logging.info(f"NUEVA conversación creada (ID: {convo.id}) y asignada a '{target_role.title}'.")
-        transfer_message = f"¡Entendido! Un agente del área de {target_role.title} te atenderá pronto."
-        response_twiml = create_twilio_response(transfer_message)
-        return response_twiml, 200, {'Content-Type': 'application/xml'}
+        return str(response_twiml), 200, {'Content-Type': 'application/xml'}
+
     except Exception as e:
         db.session.rollback()
-        logging.error(f"Error al crear nueva conversación y guardar mensaje: {e}")
+        logging.error(f"Error fatal en el webhook de WhatsApp: {e}")
+        logging.exception(e) # Imprime el stack trace
         return ('Error interno del servidor', 500)
+# --- FIN CORRECCIÓN: Webhook ---
 
 
 # --- APIS DE CHAT (PROTEGIDAS Y FILTRADAS) ---
 @app.route('/api/chats', methods=['GET'])
 @login_required
 def get_chats():
-    # ... (código sin cambios)
     try:
         open_conversations = []
         if current_user.role == 'Admin':
+            # Admin ve todos los chats 'open'
             open_conversations = Conversation.query.filter_by(status='open').options(
-                db.joinedload(Conversation.messages) # Precargar mensajes para obtener el último
+                db.joinedload(Conversation.messages),
+                db.joinedload(Conversation.bot_role)
             ).order_by(Conversation.updated_at.desc()).all()
         else:
+            # Soporte ve solo chats 'open' de sus roles asignados
             assigned_role_ids = [role.id for role in current_user.assigned_roles]
             if assigned_role_ids:
                 open_conversations = Conversation.query.filter(
                     Conversation.bot_role_id.in_(assigned_role_ids),
                     Conversation.status == 'open'
                 ).options(
-                    db.joinedload(Conversation.messages) # Precargar mensajes
+                    db.joinedload(Conversation.messages),
+                    db.joinedload(Conversation.bot_role)
                 ).order_by(Conversation.updated_at.desc()).all()
             else:
                 logging.info(f"Usuario {current_user.username} (Soporte) no tiene roles asignados.")
@@ -476,7 +617,9 @@ def get_chats():
                 "time": last_msg.timestamp.strftime("%I:%M %p") if last_msg and last_msg.timestamp else 'N/A',
                 "unread": convo.unread_count or 0,
                 "last_message": last_msg.content if last_msg else "Sin mensajes",
-                "updated_at": convo.updated_at.isoformat() if convo.updated_at else convo.created_at.isoformat()
+                "updated_at": convo.updated_at.isoformat() if convo.updated_at else convo.created_at.isoformat(),
+                "bot_role_id": convo.bot_role_id,
+                "bot_role_title": convo.bot_role.title if convo.bot_role else "N/A"
             })
         return jsonify(chat_list)
     except Exception as e:
@@ -486,26 +629,33 @@ def get_chats():
 @app.route('/api/chats/<int:convo_id>/messages', methods=['GET'])
 @login_required
 def get_chat_messages(convo_id):
-    # ... (código sin cambios)
     convo = Conversation.query.get_or_404(convo_id)
     if current_user.role != 'Admin':
         assigned_role_ids = [role.id for role in current_user.assigned_roles]
         if convo.bot_role_id not in assigned_role_ids:
-            return jsonify({"error": "No autorizado para ver este chat"}), 403
-    if convo.unread_count > 0 and convo.pending_counted:
+            # CORRECCIÓN: Permitir ver si el chat *estuvo* en su rol (transferido)
+            if convo.status == 'open': # Solo restringir si sigue abierto
+                return jsonify({"error": "No autorizado para ver este chat"}), 403
+            
+    # Marcar como leído
+    if convo.unread_count > 0:
+        convo.unread_count = 0
+    
+    # Decrementar 'pendientes' si se abre por primera vez
+    if convo.pending_counted:
         role = convo.bot_role
         if role and role.chats_pending > 0:
             role.chats_pending = role.chats_pending - 1
-            convo.pending_counted = False
-    convo.unread_count = 0
+        convo.pending_counted = False
+        
     db.session.commit()
+    
     messages = [{"sender": msg.sender_type, "text": msg.content} for msg in convo.messages]
     return jsonify(messages)
 
 @app.route('/api/chats/<int:convo_id>/messages', methods=['POST'])
 @login_required
 def send_chat_message(convo_id):
-    # ... (código sin cambios)
     convo = Conversation.query.get_or_404(convo_id)
     if current_user.role != 'Admin':
         assigned_role_ids = [role.id for role in current_user.assigned_roles]
@@ -533,7 +683,6 @@ def send_chat_message(convo_id):
 @app.route('/api/chats/<int:convo_id>/resolve', methods=['POST'])
 @login_required
 def resolve_chat(convo_id):
-    # ... (código sin cambios)
     convo = Conversation.query.get_or_404(convo_id)
     if current_user.role != 'Admin':
         assigned_role_ids = [role.id for role in current_user.assigned_roles]
@@ -555,11 +704,9 @@ def resolve_chat(convo_id):
         logging.error(f"Error al resolver chat {convo_id}: {e}")
         return jsonify({"error": str(e)}), 500
 
-# --- INICIO CORRECCIÓN: Nueva API para transferir chat ---
 @app.route('/api/chats/<int:convo_id>/transfer', methods=['POST'])
 @login_required
 def transfer_chat(convo_id):
-    """Transfiere una conversación a un nuevo rol."""
     convo = Conversation.query.get_or_404(convo_id)
     data = request.get_json()
     target_role_id = data.get('target_role_id')
@@ -567,8 +714,6 @@ def transfer_chat(convo_id):
     if not target_role_id:
         return jsonify({"error": "Falta el ID del rol de destino"}), 400
 
-    # Seguridad: Solo Admin o el asignado actual pueden transferir? Por ahora, solo logueado.
-    # Podríamos añadir lógica más compleja si fuera necesario.
     if current_user.role != 'Admin':
          assigned_role_ids = [role.id for role in current_user.assigned_roles]
          if convo.bot_role_id not in assigned_role_ids:
@@ -597,10 +742,9 @@ def transfer_chat(convo_id):
         convo.pending_counted = True # Marcar como pendiente para el nuevo rol
         convo.updated_at = datetime.utcnow() # Actualizar timestamp
         
-        # Opcional: Añadir mensaje de sistema
         system_message = Message(
             conversation_id=convo.id,
-            sender_type='system', # Nuevo tipo de remitente
+            sender_type='system',
             content=f"Chat transferido de '{original_role.title if original_role else 'N/A'}' a '{target_role.title}' por {current_user.name}."
         )
         db.session.add(system_message)
@@ -614,14 +758,12 @@ def transfer_chat(convo_id):
         db.session.rollback()
         logging.error(f"Error al transferir chat {convo_id}: {e}")
         return jsonify({"error": str(e)}), 500
-# --- FIN CORRECCIÓN ---
 
 
-# --- APIs DE DASHBOARD (sin cambios) ---
+# --- APIs DE DASHBOARD ---
 @app.route('/api/dashboard/soporte')
 @login_required
 def get_soporte_dashboard_data():
-    # ... (código sin cambios)
     try:
         assigned_role_ids = []
         if current_user.role == 'Admin':
@@ -656,7 +798,6 @@ def get_soporte_dashboard_data():
 @app.route('/api/dashboard/admin')
 @login_required
 def get_admin_dashboard_data():
-    # ... (código sin cambios)
     admin_check = check_admin()
     if admin_check: return admin_check
     try:
@@ -694,7 +835,6 @@ def get_admin_dashboard_data():
 
 # --- INICIALIZACIÓN DE LA APLICACIÓN ---
 def init_db(app_instance):
-    # ... (código sin cambios)
     with app_instance.app_context():
         try:
             db.create_all()
@@ -708,16 +848,23 @@ def init_db(app_instance):
             if not BotConfig.query.first():
                 logging.info("Creando configuración de bot por defecto.")
                 db.session.add(BotConfig(is_active=True, whatsapp_number="+573132217862", welcome_message="¡Hola! Bienvenido a nuestro servicio de atención. ¿En qué puedo ayudarte hoy?"))
+            
+            # Asegurar que el rol 'General' exista
+            if not BotRole.query.filter_by(title='General').first():
+                logging.info("Creando rol por defecto: 'General'")
+                db.session.add(BotRole(title='General', knowledge_base='Preguntas frecuentes o chat inicial.', status='Activo'))
+
             roles_default = {
                 "Area Cotizaciones": "Es el cotizador de negocios...", "Renovaciones": "De manera proactiva...",
                 "Agente de ventas/Comercial #1": "Este módulo actúa como...", "Agente de ventas/Comercial #2": "Módulo de primer contacto...",
                 "Agente de ventas/Comercial #3": "Módulo de primer contacto...", "Siniestros, Consultas Póliza, Cancelaciones": "Diseñado para asistir...",
-                "Ventas": "Consultas sobre compra...", "Soporte Técnico": "Problemas con la plataforma...", "General": "Preguntas frecuentes..."
+                "Ventas": "Consultas sobre compra...", "Soporte Técnico": "Problemas con la plataforma..."
             }
             for title, knowledge in roles_default.items():
                 if not BotRole.query.filter_by(title=title).first():
                     logging.info(f"Creando rol por defecto: '{title}'")
                     db.session.add(BotRole(title=title, knowledge_base=knowledge))
+            
             db.session.commit()
         except Exception as e:
             db.session.rollback()
