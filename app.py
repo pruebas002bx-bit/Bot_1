@@ -443,36 +443,53 @@ def whatsapp_webhook():
         logging.error(f"Error al crear nueva conversación y guardar mensaje: {e}")
         return ('Error interno del servidor', 500)
 
-# --- APIS DE CHAT (PROTEGIDAS Y FILTRADAS) ---
+
+
 @app.route('/api/chats', methods=['GET'])
 @login_required
 def get_chats():
+    """
+    Obtiene la lista de chats activos FILTRADA para el usuario logueado.
+    Ahora incluye 'updated_at' para el polling.
+    """
     try:
         open_conversations = []
         if current_user.role == 'Admin':
-            open_conversations = Conversation.query.filter_by(status='open').order_by(Conversation.updated_at.desc()).all()
+            open_conversations = Conversation.query.filter_by(status='open').options(
+                db.joinedload(Conversation.messages) # Precargar mensajes para obtener el último
+            ).order_by(Conversation.updated_at.desc()).all()
         else:
             assigned_role_ids = [role.id for role in current_user.assigned_roles]
             if assigned_role_ids:
                 open_conversations = Conversation.query.filter(
                     Conversation.bot_role_id.in_(assigned_role_ids),
                     Conversation.status == 'open'
+                ).options(
+                    db.joinedload(Conversation.messages) # Precargar mensajes
                 ).order_by(Conversation.updated_at.desc()).all()
             else:
                 logging.info(f"Usuario {current_user.username} (Soporte) no tiene roles asignados.")
+
         chat_list = []
         for convo in open_conversations:
             last_msg = convo.get_last_message()
+            # --- INICIO CORRECCIÓN ---
             chat_list.append({
-                "id": convo.id, "name": convo.user_phone.replace('whatsapp:', ''),
+                "id": convo.id,
+                "name": convo.user_phone.replace('whatsapp:', ''),
                 "phone": convo.user_phone.replace('whatsapp:', ''),
                 "time": last_msg.timestamp.strftime("%I:%M %p") if last_msg and last_msg.timestamp else 'N/A',
-                "unread": convo.unread_count, "last_message": last_msg.content if last_msg else "Sin mensajes"
+                "unread": convo.unread_count or 0, # Asegurar 0 si es null
+                "last_message": last_msg.content if last_msg else "Sin mensajes",
+                "updated_at": convo.updated_at.isoformat() if convo.updated_at else convo.created_at.isoformat() # Añadir timestamp ISO
             })
+            # --- FIN CORRECCIÓN ---
         return jsonify(chat_list)
     except Exception as e:
         logging.error(f"Error en /api/chats: {e}")
         return jsonify({"error": str(e)}), 500
+
+
 
 @app.route('/api/chats/<int:convo_id>/messages', methods=['GET'])
 @login_required
