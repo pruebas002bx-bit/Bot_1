@@ -6,6 +6,7 @@
     <title>Chats Generales</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <style>
+        /* --- ESTILOS (sin cambios, omitidos por brevedad) --- */
         :root {
             --left-panel-bg: #f0f2f5;
             --right-panel-header-bg: #e9edef;
@@ -18,12 +19,12 @@
             --received-bubble-bg: #ffffff;
             --danger-color: #ef4444;
             --success-color: #16a34a;
+            --system-message-color: #4b5563; /* Color para mensajes del sistema */
             --avatar-colors: #b91c1c, #b45309, #a16207, #4d7c0f, #15803d, #0f766e, #1d4ed8, #6d28d9, #be185d;
         }
         * { box-sizing: border-box; }
         html, body { height: 100%; width: 100%; margin: 0; padding: 0; overflow: hidden; font-family: 'Inter', sans-serif; background-color: #f0f2f5; }
         .chat-container { width: 100vw; height: 100vh; display: flex; }
-        /* --- Panel Izquierdo --- */
         .chat-list-panel { width: 30%; min-width: 350px; max-width: 450px; background: #ffffff; border-right: 1px solid var(--border-color); display: flex; flex-direction: column; }
         .chat-list-header { padding: 10px 16px; background: var(--right-panel-header-bg); flex-shrink: 0; }
         .chat-search input { width: 100%; padding: 10px 15px; border-radius: 8px; border: none; background-color: #ffffff; }
@@ -41,13 +42,11 @@
         .chat-tabs { display: flex; border-bottom: 2px solid #e2e8f0; margin-top: 10px; }
         .tab-btn { flex: 1; padding: 12px; background: none; border: none; cursor: pointer; font-weight: 600; color: var(--text-secondary); border-bottom: 3px solid transparent; transition: all 0.2s; }
         .tab-btn.active { color: var(--accent-color); border-bottom-color: var(--accent-color); }
-
-        /* --- Panel Derecho --- */
         .chat-window-panel { width: 70%; display: flex; flex-direction: column; }
         .chat-window-header { padding: 10px 20px; background: var(--right-panel-header-bg); border-bottom: 1px solid var(--border-color); display: flex; justify-content: space-between; align-items: center; }
         .contact-info { display: flex; align-items: center; }
         .contact-info .avatar { width: 40px; height: 40px; font-size: 1em; }
-        .contact-details { display: flex; flex-direction: column; margin-left: 15px; } /* Añadido margen */
+        .contact-details { display: flex; flex-direction: column; margin-left: 15px; }
         .contact-details .name { font-weight: 500; }
         .contact-details .phone { font-size: 0.85em; color: var(--text-secondary); }
         .header-actions { position: relative; }
@@ -60,22 +59,26 @@
         .actions-dropdown a i { width: 30px; text-align: center; color: var(--text-secondary); }
         .actions-dropdown a.danger-action { color: var(--danger-color); }
         .message-area { flex-grow: 1; padding: 20px 8%; overflow-y: auto; display: flex; flex-direction: column; background-image: var(--chat-bg-image); }
-        .message-bubble { max-width: 60%; padding: 8px 12px; border-radius: 8px; margin-bottom: 5px; line-height: 1.4; box-shadow: 0 1px 1px rgba(0,0,0,0.05); word-wrap: break-word; /* Asegura que palabras largas se rompan */ }
+        .message-bubble { max-width: 60%; padding: 8px 12px; border-radius: 8px; margin-bottom: 5px; line-height: 1.4; box-shadow: 0 1px 1px rgba(0,0,0,0.05); word-wrap: break-word; }
         .sent { background-color: var(--sent-bubble-bg); align-self: flex-end; }
         .received { background-color: var(--received-bubble-bg); align-self: flex-start; }
+        /* --- INICIO CORRECCIÓN: Estilo para mensajes del sistema --- */
+        .system { background-color: #e2e8f0; color: var(--system-message-color); font-size: 0.8em; align-self: center; padding: 4px 10px; margin-top: 5px; border-radius: 12px; font-style: italic; }
+        /* --- FIN CORRECCIÓN --- */
         .message-input-area { padding: 10px 20px; background: var(--right-panel-header-bg); display: flex; align-items: center; }
         .message-input-area input { flex-grow: 1; padding: 12px 20px; border: none; border-radius: 24px; margin: 0 10px; }
         .message-input-area button { background: var(--accent-color); color: white; border: none; width: 48px; height: 48px; border-radius: 50%; font-size: 1.2em; cursor: pointer; transition: opacity 0.2s; }
         .message-input-area button:hover { opacity: 0.9; }
         .empty-chat-window { flex-grow: 1; display: flex; justify-content: center; align-items: center; text-align: center; color: var(--text-secondary); background: var(--right-panel-header-bg); }
-
-        /* --- Ventana Modal --- */
         .modal-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0, 0, 0, 0.6); backdrop-filter: blur(5px); display: none; align-items: center; justify-content: center; z-index: 1000; opacity: 0; transition: opacity 0.3s ease; }
         .modal-overlay.show { display: flex; opacity: 1; }
         .modal-content { background: white; padding: 30px; border-radius: 16px; width: 90%; max-width: 450px; text-align: center; box-shadow: 0 5px 25px rgba(0,0,0,0.2); transform: scale(0.9); transition: transform 0.3s ease; }
         .modal-overlay.show .modal-content { transform: scale(1); }
         .modal-content h2 { margin-top: 0; margin-bottom: 15px; color: var(--text-primary); }
         .modal-content p { margin-bottom: 25px; color: var(--text-secondary); line-height: 1.6; }
+        .modal-form-group { text-align: left; margin-bottom: 25px; }
+        .modal-form-group label { display: block; font-weight: 500; margin-bottom: 8px; color: var(--text-secondary); }
+        .modal-form-group select { width: 100%; padding: 12px; border: 1px solid #ccc; border-radius: 8px; font-size: 1em; }
         .modal-actions { display: flex; justify-content: center; gap: 15px; }
         .modal-actions button { padding: 12px 25px; border: none; border-radius: 8px; font-weight: 600; cursor: pointer; transition: background-color 0.2s; min-width: 130px; }
         .btn-cancel { background-color: #e5e7eb; color: var(--text-secondary); }
@@ -84,6 +87,7 @@
         .btn-confirm.primary { background-color: var(--accent-color); }
         .btn-confirm.primary:hover { opacity: 0.9; }
         .success-icon { font-size: 4em; color: var(--success-color); margin-bottom: 20px; }
+
     </style>
 </head>
 <body>
@@ -100,6 +104,22 @@
         <main class="chat-window-panel" id="chat-window"></main>
     </div>
 
+    <div class="modal-overlay" id="transfer-modal">
+        <div class="modal-content">
+            <h2>Transferir Chat</h2>
+            <p>Selecciona el nuevo rol al que deseas asignar esta conversación.</p>
+            <div class="modal-form-group">
+                <label for="transfer-role-select">Transferir a:</label>
+                <select id="transfer-role-select">
+                    <option value="">Cargando roles...</option>
+                </select>
+            </div>
+            <div class="modal-actions">
+                <button class="btn-cancel" id="transfer-cancel-btn">Cancelar</button>
+                <button class="btn-confirm primary" id="transfer-confirm-btn">Confirmar</button>
+            </div>
+        </div>
+    </div>
     <div class="modal-overlay" id="success-modal">
         <div class="modal-content">
             <div class="success-icon"><i class="fas fa-check-circle"></i></div>
@@ -114,12 +134,10 @@
 <script>
 document.addEventListener('DOMContentLoaded', () => {
     let activeChatId = null;
-    let allChats = []; // Caché local de chats
-    let chatDataMap = new Map(); // Mapa para guardar datos y timestamps de cada chat
-    // --- INICIO CORRECCIÓN: Polling ---
+    let allChats = [];
+    let chatDataMap = new Map();
     let pollingInterval = null;
-    const POLLING_RATE_MS = 2000; // Preguntar cada 5 segundos
-    // --- FIN CORRECCIÓN ---
+    const POLLING_RATE_MS = 2000; // Reducido a 2 segundos
 
     const chatListEl = document.getElementById('chat-list');
     const chatWindowEl = document.getElementById('chat-window');
@@ -128,6 +146,13 @@ document.addEventListener('DOMContentLoaded', () => {
     const tabs = document.querySelectorAll('.tab-btn');
     const searchInput = document.getElementById('chat-search-input');
     const avatarColors = ['#b91c1c', '#b45309', '#a16207', '#4d7c0f', '#15803d', '#0f766e', '#1d4ed8', '#6d28d9', '#be185d'];
+
+    // --- INICIO CORRECCIÓN: Elementos del Modal de Transferencia ---
+    const transferModalEl = document.getElementById('transfer-modal');
+    const transferRoleSelect = document.getElementById('transfer-role-select');
+    const transferConfirmBtn = document.getElementById('transfer-confirm-btn');
+    const transferCancelBtn = document.getElementById('transfer-cancel-btn');
+    // --- FIN CORRECCIÓN ---
 
     const openSuccessModal = (message) => {
         document.getElementById('success-modal-message').textContent = message;
@@ -142,96 +167,81 @@ document.addEventListener('DOMContentLoaded', () => {
         return { initials, color };
     };
 
-    // --- INICIO CORRECCIÓN: Separar renderizado de carga ---
     const renderChatList = (filter = '') => {
         const filteredChats = allChats.filter(chat =>
-            chat.name.toLowerCase().includes(filter.toLowerCase()) ||
-            chat.phone.includes(filter)
+            chat.name.toLowerCase().includes(filter.toLowerCase()) || chat.phone.includes(filter)
         );
-
-        // Ordenar por 'updated_at' descendente antes de renderizar
         filteredChats.sort((a, b) => new Date(b.updated_at) - new Date(a.updated_at));
 
         chatListEl.innerHTML = '';
         if (filteredChats.length === 0) {
-            chatListEl.innerHTML = '<p style="padding: 20px; text-align: center; color: #6b7280;">No hay chats activos.</p>';
+            chatListEl.innerHTML = '<p style="padding: 20px; text-align: center; color: #6b7280;">No hay chats activos asignados.</p>';
             return;
         }
 
         filteredChats.forEach(chat => {
             const { initials, color } = getAvatarDetails(chat.name, chat.id);
-            // Usar el contador 'unread' de la API
             const unreadBadge = chat.unread > 0 ? `<div class="unread-badge">${chat.unread}</div>` : '';
             const chatItem = document.createElement('div');
             chatItem.className = `chat-item ${chat.id === activeChatId ? 'active' : ''}`;
             chatItem.dataset.chatId = chat.id;
             chatItem.innerHTML = `
                 <div class="avatar" style="background-color: ${color};">${initials}</div>
-                <div class="chat-info">
-                    <div class="name">${chat.name}</div>
-                    <div class="last-message">${chat.last_message}</div>
-                </div>
-                <div class="chat-meta">
-                    <div class="chat-time">${chat.time}</div>
-                    ${unreadBadge}
-                </div>`;
+                <div class="chat-info"> <div class="name">${chat.name}</div> <div class="last-message">${chat.last_message}</div> </div>
+                <div class="chat-meta"> <div class="chat-time">${chat.time}</div> ${unreadBadge} </div>`;
             chatListEl.appendChild(chatItem);
         });
     };
-    // --- FIN CORRECCIÓN ---
 
     const renderEmptyState = () => {
         chatWindowEl.innerHTML = `<div class="empty-chat-window"><div><i class="fas fa-comments" style="font-size: 5em; color: #dfe3e6;"></i><h2 style="margin-top: 20px;">Selecciona un chat para empezar</h2></div></div>`;
     };
 
-    // --- INICIO CORRECCIÓN: Función separada para cargar mensajes ---
     const fetchMessagesForChat = async (chatId) => {
         try {
             const response = await fetch(`/api/chats/${chatId}/messages`);
             if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
             const messages = await response.json();
-
             const messageArea = document.getElementById('message-area');
-            if (!messageArea) return; // Salir si la ventana de chat no está renderizada
+            if (!messageArea) return;
 
-            messageArea.innerHTML = messages.map(msg =>
-                `<div class="message-bubble ${msg.sender === 'agent' ? 'sent' : 'received'}">${msg.text}</div>`
-            ).join('');
+            // --- INICIO CORRECCIÓN: Renderizar mensajes del sistema ---
+            messageArea.innerHTML = messages.map(msg => {
+                let bubbleClass = '';
+                if (msg.sender === 'agent') bubbleClass = 'sent';
+                else if (msg.sender === 'user') bubbleClass = 'received';
+                else if (msg.sender === 'system') bubbleClass = 'system'; // Nueva clase
+                return `<div class="message-bubble ${bubbleClass}">${msg.text}</div>`;
+            }).join('');
+            // --- FIN CORRECCIÓN ---
 
-            // Auto-scroll al final solo si el usuario no ha scrolleado hacia arriba
-            // (Comprobación simple: si está cerca del fondo)
             if (messageArea.scrollHeight - messageArea.scrollTop <= messageArea.clientHeight + 100) {
                 messageArea.scrollTop = messageArea.scrollHeight;
             }
-
         } catch (error) {
             console.error('Error al cargar mensajes:', error);
             const messageArea = document.getElementById('message-area');
             if(messageArea) messageArea.innerHTML = '<p style="text-align:center; color: red;">Error al cargar mensajes.</p>';
         }
     };
-    // --- FIN CORRECCIÓN ---
 
     const renderChatWindow = (chatId) => {
         const chat = allChats.find(c => c.id === chatId);
         if (!chat) { renderEmptyState(); return; }
-
         const { initials, color } = getAvatarDetails(chat.name, chat.id);
 
         chatWindowEl.innerHTML = `
             <header class="chat-window-header">
                 <div class="contact-info">
                     <div class="avatar" style="background-color: ${color};">${initials}</div>
-                    <div class="contact-details">
-                        <div class="name">${chat.name}</div>
-                        <div class="phone">${chat.phone}</div>
-                    </div>
+                    <div class="contact-details"> <div class="name">${chat.name}</div> <div class="phone">${chat.phone}</div> </div>
                 </div>
                 <div class="header-actions">
                     <button class="actions-menu-btn" id="actions-menu-btn"><i class="fas fa-ellipsis-v"></i></button>
                     <div class="actions-dropdown" id="actions-dropdown">
                         <a href="#" data-action="archive"><i class="fas fa-archive"></i> Marcar como Resuelto</a>
-                    </div>
+                        <a href="#" data-action="transfer" class="danger-action"><i class="fas fa-random"></i> Transferir Chat</a>
+                        </div>
                 </div>
             </header>
             <div class="message-area" id="message-area"><p style="text-align:center; color: #6b7280;">Cargando mensajes...</p></div>
@@ -241,19 +251,18 @@ document.addEventListener('DOMContentLoaded', () => {
                     <button type="submit"><i class="fas fa-paper-plane"></i></button>
                 </form>
             </footer>`;
-
-        // Cargar mensajes usando la nueva función
         fetchMessagesForChat(chatId);
     };
 
     const archiveActiveChat = async () => {
+        // ... (código sin cambios)
         if (activeChatId === null) return;
         try {
             const response = await fetch(`/api/chats/${activeChatId}/resolve`, { method: 'POST' });
             if (!response.ok) throw new Error('No se pudo archivar el chat.');
             openSuccessModal('El chat ha sido marcado como resuelto.');
             activeChatId = null;
-            await pollChats(true); // Forzar actualización inmediata de la lista
+            await pollChats(true);
             renderEmptyState();
         } catch (error) {
             console.error(error);
@@ -261,59 +270,126 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     };
 
-    // --- INICIO CORRECCIÓN: Lógica de Polling ---
+    // --- INICIO CORRECCIÓN: Funciones para Transferencia ---
+    const populateTransferModal = async () => {
+        transferRoleSelect.innerHTML = '<option value="">Cargando roles...</option>';
+        try {
+            const response = await fetch('/api/bot_roles/list');
+            if (!response.ok) throw new Error('Error al cargar roles');
+            const roles = await response.json();
+
+            // Filtrar el rol actual del chat si es posible
+            const currentChat = chatDataMap.get(activeChatId);
+            const currentRoleId = currentChat?.bot_role_id; // Necesitamos el ID del rol actual
+
+            transferRoleSelect.innerHTML = '<option value="">-- Selecciona un rol --</option>';
+            roles.forEach(role => {
+                // No mostrar el rol actual en la lista de destino
+                if (role.id !== currentRoleId) {
+                    const option = document.createElement('option');
+                    option.value = role.id;
+                    option.textContent = role.title;
+                    transferRoleSelect.appendChild(option);
+                }
+            });
+            transferConfirmBtn.disabled = true; // Deshabilitar hasta que se seleccione algo
+
+        } catch (error) {
+            console.error(error);
+            transferRoleSelect.innerHTML = '<option value="">Error al cargar</option>';
+        }
+    };
+
+    transferRoleSelect.addEventListener('change', () => {
+        transferConfirmBtn.disabled = !transferRoleSelect.value;
+    });
+
+    const openTransferModal = () => {
+        if (activeChatId === null) return;
+        populateTransferModal(); // Llenar el dropdown
+        transferModalEl.classList.add('show');
+    };
+
+    const closeTransferModal = () => {
+        transferModalEl.classList.remove('show');
+    };
+
+    const transferActiveChat = async () => {
+        const targetRoleId = transferRoleSelect.value;
+        if (!targetRoleId || activeChatId === null) return;
+
+        transferConfirmBtn.disabled = true; // Evitar doble click
+        transferConfirmBtn.textContent = 'Transfiriendo...';
+
+        try {
+            const response = await fetch(`/api/chats/${activeChatId}/transfer`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ target_role_id: targetRoleId }),
+            });
+
+            if (!response.ok) {
+                 const errorData = await response.json();
+                 throw new Error(errorData.error || 'Error al transferir el chat.');
+            }
+
+            closeTransferModal();
+            openSuccessModal('Chat transferido con éxito.');
+            activeChatId = null;
+            await pollChats(true); // Actualizar lista inmediatamente
+            renderEmptyState();
+
+        } catch (error) {
+            console.error(error);
+            alert(`Error: ${error.message}`);
+        } finally {
+             transferConfirmBtn.disabled = false;
+             transferConfirmBtn.textContent = 'Confirmar';
+        }
+    };
+
+    transferCancelBtn.addEventListener('click', closeTransferModal);
+    transferConfirmBtn.addEventListener('click', transferActiveChat);
+    // --- FIN CORRECCIÓN ---
+
     const pollChats = async (forceListUpdate = false) => {
+        // ... (código sin cambios)
         try {
             const response = await fetch('/api/chats');
             if (!response.ok) {
                 console.error('Error en polling:', response.status);
-                return; // Intentar de nuevo en el próximo intervalo
+                return;
             }
             const latestChats = await response.json();
-
             let listNeedsUpdate = forceListUpdate;
             let activeChatNeedsUpdate = false;
-
-            // Procesar actualizaciones
             latestChats.forEach(newChatData => {
                 const existingChatData = chatDataMap.get(newChatData.id);
-
-                // Comprobar si hay cambios
                 if (!existingChatData || newChatData.updated_at !== existingChatData.updated_at) {
-                    chatDataMap.set(newChatData.id, newChatData); // Actualizar caché
-
-                    // Si es el chat activo, marcar para recargar mensajes
-                    if (newChatData.id === activeChatId) {
-                        activeChatNeedsUpdate = true;
-                    }
-                    // Marcar que la lista necesita re-renderizarse
+                    chatDataMap.set(newChatData.id, newChatData);
+                    if (newChatData.id === activeChatId) { activeChatNeedsUpdate = true; }
                     listNeedsUpdate = true;
                 }
             });
-
-            // Comprobar si algún chat fue eliminado (resuelto)
-            if (allChats.length !== latestChats.length) {
-                 listNeedsUpdate = true;
+            // Comprobar chats eliminados/resueltos/transferidos que ya no están en la lista del agente
+            const latestChatIds = new Set(latestChats.map(c => c.id));
+            let chatRemoved = false;
+            for (const existingId of chatDataMap.keys()) {
+                if (!latestChatIds.has(existingId)) {
+                    chatDataMap.delete(existingId);
+                    listNeedsUpdate = true;
+                    if (existingId === activeChatId) { // Si el chat activo fue removido
+                        activeChatId = null;
+                        renderEmptyState(); // Limpiar ventana derecha
+                        chatRemoved = true;
+                    }
+                }
             }
+            if (chatRemoved) activeChatNeedsUpdate = false; // Ya no hay chat activo que actualizar
 
-            // Actualizar el array local y el mapa
-            allChats = latestChats;
-            chatDataMap.clear(); // Limpiar y reconstruir el mapa
-            allChats.forEach(chat => chatDataMap.set(chat.id, chat));
-
-
-            // Re-renderizar la lista si es necesario
-            if (listNeedsUpdate) {
-                renderChatList(searchInput.value.trim());
-            }
-
-            // Recargar mensajes del chat activo si cambió
-            if (activeChatNeedsUpdate) {
-                fetchMessagesForChat(activeChatId);
-                // Si el chat activo tenía 'unread', resetearlo visualmente ahora que se actualizó
-                const activeChatListItem = chatListEl.querySelector(`.chat-item[data-chat-id="${activeChatId}"] .unread-badge`);
-                if(activeChatListItem) activeChatListItem.remove();
-            }
+            allChats = latestChats; // Actualizar la lista local
+            if (listNeedsUpdate) { renderChatList(searchInput.value.trim()); }
+            if (activeChatNeedsUpdate) { fetchMessagesForChat(activeChatId); }
 
         } catch (error) {
             console.error('Error durante el polling:', error);
@@ -321,26 +397,19 @@ document.addEventListener('DOMContentLoaded', () => {
     };
 
     const startPolling = () => {
-        // Limpiar intervalo anterior si existe
         if (pollingInterval) clearInterval(pollingInterval);
-        // Cargar datos iniciales
-        pollChats(true); // Forzar renderizado inicial
-        // Iniciar el polling
+        pollChats(true);
         pollingInterval = setInterval(pollChats, POLLING_RATE_MS);
     };
-
     const stopPolling = () => {
         if (pollingInterval) clearInterval(pollingInterval);
         pollingInterval = null;
     };
-    // --- FIN CORRECCIÓN ---
 
     tabs.forEach(tab => {
         tab.addEventListener('click', () => {
-            // Lógica de pestañas (si se implementa 'archivados' en el futuro)
-            // Por ahora, solo recarga la vista activa
             activeChatId = null;
-            pollChats(true); // Forzar actualización de lista
+            pollChats(true);
             renderEmptyState();
         });
     });
@@ -353,15 +422,10 @@ document.addEventListener('DOMContentLoaded', () => {
         const chatItem = e.target.closest('.chat-item');
         if (chatItem) {
             const newActiveChatId = parseInt(chatItem.dataset.chatId);
-            if (newActiveChatId === activeChatId) return; // No hacer nada si se hace clic en el chat ya activo
-
+            if (newActiveChatId === activeChatId) return;
             activeChatId = newActiveChatId;
-
-            // Actualizar visualmente la lista (marcar activo, quitar no leído)
             allChats.forEach(chat => { if(chat.id === activeChatId) chat.unread = 0; });
             renderChatList(searchInput.value.trim());
-
-            // Renderizar la ventana de chat (fetchMessagesForChat se llama dentro)
             renderChatWindow(activeChatId);
         }
     });
@@ -376,6 +440,9 @@ document.addEventListener('DOMContentLoaded', () => {
             e.preventDefault();
             const action = actionLink.dataset.action;
             if (action === 'archive') archiveActiveChat();
+            // --- INICIO CORRECCIÓN: Llamar a abrir modal de transferencia ---
+            if (action === 'transfer') openTransferModal();
+            // --- FIN CORRECCIÓN ---
             if (dropdown) dropdown.classList.remove('show');
         } else if (!e.target.closest('.header-actions')) {
             if (dropdown) dropdown.classList.remove('show');
@@ -383,11 +450,11 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     chatWindowEl.addEventListener('submit', async (e) => {
+        // ... (código sin cambios)
         if (e.target.id === 'message-form') {
             e.preventDefault();
             const input = document.getElementById('message-input');
             const messageText = input.value.trim();
-
             if (messageText && activeChatId !== null) {
                 const messageArea = document.getElementById('message-area');
                 const tempBubble = document.createElement('div');
@@ -396,26 +463,19 @@ document.addEventListener('DOMContentLoaded', () => {
                 tempBubble.style.opacity = '0.7';
                 messageArea.appendChild(tempBubble);
                 messageArea.scrollTop = messageArea.scrollHeight;
-
                 const messageToSend = input.value;
                 input.value = '';
-
                 try {
                     const response = await fetch(`/api/chats/${activeChatId}/messages`, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({ text: messageToSend }),
                     });
-
                     if (!response.ok) throw new Error('Error al enviar mensaje');
-
                     const result = await response.json();
                     tempBubble.textContent = result.message.text;
                     tempBubble.style.opacity = '1';
-
-                    // Forzar actualización inmediata de la lista y timestamps después de enviar
-                    await pollChats(true);
-
+                    await pollChats(true); // Forzar actualización de lista
                 } catch (error) {
                     console.error(error);
                     tempBubble.textContent += ' (Error al enviar)';
@@ -427,13 +487,9 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 
-    // Carga inicial y inicio del polling
     renderEmptyState();
-    startPolling(); // Inicia la carga inicial y el polling
-
-    // Detener polling si el usuario cierra la pestaña/navegador
+    startPolling();
     window.addEventListener('beforeunload', stopPolling);
-
 });
 </script>
 </body>

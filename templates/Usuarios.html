@@ -19,6 +19,14 @@
             --input-border: #d1d5db;
         }
 
+        /* --- INICIO DE LA CORRECCIÓN --- */
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        /* --- FIN DE LA CORRECCIÓN --- */
+
         body {
             background-image: url('https://i.postimg.cc/pLqCVDFx/Chat-GPT-Image-19-sept-2025-18-11-46.png');
             background-size: cover;
@@ -91,6 +99,9 @@
             background-color: var(--input-bg);
             font-size: 1em;
             transition: border-color 0.2s, box-shadow 0.2s;
+            /* --- INICIO DE LA CORRECCIÓN --- */
+            font-family: 'Inter', sans-serif; /* Asegura consistencia de fuente */
+            /* --- FIN DE LA CORRECCIÓN --- */
         }
         .form-group input:focus, .form-group select:focus {
             outline: none;
