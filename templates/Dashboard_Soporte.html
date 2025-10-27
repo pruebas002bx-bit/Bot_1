@@ -106,15 +106,15 @@
         <div class="dashboard-grid">
             <div class="stat-card">
                 <div class="icon"><i class="fas fa-calendar-day"></i></div>
-                <div class="info"><h3>Mensajes Hoy</h3><p>87</p></div>
+                <div class="info"><h3>Mensajes Hoy</h3><p id="stats-today">0</p></div>
             </div>
             <div class="stat-card">
                 <div class="icon"><i class="fas fa-calendar-week"></i></div>
-                <div class="info"><h3>Mensajes (Semana)</h3><p>562</p></div>
+                <div class="info"><h3>Mensajes (Semana)</h3><p id="stats-week">0</p></div>
             </div>
             <div class="stat-card">
                 <div class="icon"><i class="fas fa-calendar-alt"></i></div>
-                <div class="info"><h3>Mensajes (Mes)</h3><p>2,315</p></div>
+                <div class="info"><h3>Mensajes (Mes)</h3><p id="stats-month">0</p></div>
             </div>
 
             <div class="chart-card line-chart-container">
@@ -122,49 +122,83 @@
                 <div class="chart-wrapper"><canvas id="chatsPerDayChart"></canvas></div>
             </div>
             <div class="chart-card bar-chart-container">
-                <h2>Motivos de Consulta</h2>
+                <h2>Motivos de Consulta (por Rol)</h2>
                 <div class="chart-wrapper"><canvas id="chatsByTopicChart"></canvas></div>
             </div>
         </div>
     </div>
 
     <script>
-        document.addEventListener('DOMContentLoaded', () => {
+        document.addEventListener('DOMContentLoaded', async () => {
             Chart.defaults.font.family = "'Inter', sans-serif";
             Chart.defaults.color = '#4B5563';
 
-            // --- GRÁFICO DE LÍNEAS CON COLORES GRISES ---
-            const ctxLine = document.getElementById('chatsPerDayChart').getContext('2d');
-            const gradient = ctxLine.createLinearGradient(0, 0, 0, 350);
-            gradient.addColorStop(0, 'rgba(74, 85, 104, 0.3)'); // Gris oscuro
-            gradient.addColorStop(1, 'rgba(74, 85, 104, 0)');
-            new Chart(ctxLine, {
-                type: 'line',
-                data: {
-                    labels: ['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom'],
-                    datasets: [{
-                        label: 'Mensajes Recibidos', data: [65, 59, 80, 87, 76, 85, 90],
-                        fill: true, backgroundColor: gradient, borderColor: '#2D3748',
-                        tension: 0.4, pointBackgroundColor: '#2D3748'
-                    }]
-                },
-                options: { responsive: true, maintainAspectRatio: false, scales: { y: { beginAtZero: true } }, plugins: { legend: { display: false } } }
-            });
+            let lineChartInstance;
+            let barChartInstance;
+            
+            const renderLineChart = (labels, data) => {
+                const ctxLine = document.getElementById('chatsPerDayChart').getContext('2d');
+                const gradient = ctxLine.createLinearGradient(0, 0, 0, 350);
+                gradient.addColorStop(0, 'rgba(74, 85, 104, 0.3)');
+                gradient.addColorStop(1, 'rgba(74, 85, 104, 0)');
+                
+                if(lineChartInstance) lineChartInstance.destroy();
+                lineChartInstance = new Chart(ctxLine, {
+                    type: 'line',
+                    data: {
+                        labels: labels,
+                        datasets: [{
+                            label: 'Mensajes Recibidos', data: data,
+                            fill: true, backgroundColor: gradient, borderColor: '#2D3748',
+                            tension: 0.4, pointBackgroundColor: '#2D3748'
+                        }]
+                    },
+                    options: { responsive: true, maintainAspectRatio: false, scales: { y: { beginAtZero: true } }, plugins: { legend: { display: false } } }
+                });
+            };
 
-            // --- GRÁFICO DE BARRAS CON COLORES GRISES ---
-            const ctxBar = document.getElementById('chatsByTopicChart').getContext('2d');
-            new Chart(ctxBar, {
-                type: 'bar',
-                data: {
-                    labels: ['Contraseña', 'Conexión', 'Factura', 'Uso App', 'Otro'],
-                    datasets: [{
-                        label: 'Número de Consultas', data: [120, 90, 65, 150, 45],
-                        backgroundColor: ['#2D3748', '#4A5568', '#718096', '#A0AEC0', '#CBD5E0'],
-                        borderRadius: 6
-                    }]
-                },
-                options: { responsive: true, maintainAspectRatio: false, indexAxis: 'y', scales: { x: { beginAtZero: true } }, plugins: { legend: { display: false } } }
-            });
+            const renderBarChart = (labels, data) => {
+                const ctxBar = document.getElementById('chatsByTopicChart').getContext('2d');
+                if(barChartInstance) barChartInstance.destroy();
+                barChartInstance = new Chart(ctxBar, {
+                    type: 'bar',
+                    data: {
+                        labels: labels,
+                        datasets: [{
+                            label: 'Número de Consultas', data: data,
+                            backgroundColor: ['#2D3748', '#4A5568', '#718096', '#A0AEC0', '#CBD5E0'],
+                            borderRadius: 6
+                        }]
+                    },
+                    options: { responsive: true, maintainAspectRatio: false, indexAxis: 'y', scales: { x: { beginAtZero: true } }, plugins: { legend: { display: false } } }
+                });
+            };
+            
+            const loadDashboardData = async () => {
+                try {
+                    const response = await fetch('/api/dashboard/soporte');
+                    if(!response.ok) throw new Error('Error al cargar datos del dashboard');
+                    const data = await response.json();
+                    
+                    // Llenar tarjetas
+                    document.getElementById('stats-today').textContent = data.stats.today;
+                    document.getElementById('stats-week').textContent = data.stats.week;
+                    document.getElementById('stats-month').textContent = data.stats.month;
+                    
+                    // Renderizar gráficos
+                    renderLineChart(data.lineChart.labels, data.lineChart.data);
+                    renderBarChart(data.barChart.labels, data.barChart.data);
+                    
+                } catch (error) {
+                    console.error(error);
+                    // Dejar los gráficos con datos de ejemplo si falla la API
+                    renderLineChart(['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom'], [0, 0, 0, 0, 0, 0, 0]);
+                    renderBarChart(['Error'], [0]);
+                }
+            };
+            
+            // Carga inicial
+            loadDashboardData();
         });
     </script>
 </body>

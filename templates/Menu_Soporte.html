@@ -129,20 +129,20 @@
             <img src="https://i.ibb.co/sdjhJhJV/image-removebg-preview-21.png" alt="Logo de la Empresa">
         </div>
         <nav class="nav-menu">
-            <a href="#" class="nav-link active" data-page="Dashboard_Soporte.html"><i class="fas fa-tachometer-alt"></i><span>Dashboard</span></a>
-            <a href="#" class="nav-link" data-page="Chats_Generales.html"><i class="fas fa-comments"></i><span>Chats Generales</span></a>
-        </nav>
+            <a href="#" class="nav-link active" data-page="{{ url_for('show_page', page_name='Dashboard_Soporte.html') }}"><i class="fas fa-tachometer-alt"></i><span>Dashboard</span></a>
+            <a href="#" class="nav-link" data-page="{{ url_for('show_page', page_name='Chats_Generales.html') }}"><i class="fas fa-comments"></i><span>Chats Generales</span></a>
+            </nav>
         <div class="sidebar-footer">
             <div class="live-clock">
                 <div id="clock-time" class="time">--:--:--</div>
                 <div id="clock-date" class="date">----------</div>
             </div>
-            <a href="Index.html" class="nav-link"><i class="fas fa-sign-out-alt"></i><span>Cerrar Sesión</span></a>
+            <a href="{{ url_for('index') }}" class="nav-link"><i class="fas fa-sign-out-alt"></i><span>Cerrar Sesión</span></a>
         </div>
     </aside>
 
     <main class="main-content">
-        <iframe id="content-frame" src="Dashboard_Soporte.html" name="content-frame"></iframe>
+        <iframe id="content-frame" src="{{ url_for('show_page', page_name='Dashboard_Soporte.html') }}" name="content-frame"></iframe>
     </main>
 
     <script>
@@ -152,46 +152,34 @@
             const clockTime = document.getElementById('clock-time');
             const clockDate = document.getElementById('clock-date');
 
-            // --- Función para actualizar el reloj ---
             function updateClock() {
                 const now = new Date();
                 const hours = String(now.getHours()).padStart(2, '0');
                 const minutes = String(now.getMinutes()).padStart(2, '0');
                 const seconds = String(now.getSeconds()).padStart(2, '0');
-                
                 clockTime.textContent = `${hours}:${minutes}:${seconds}`;
-
                 const options = { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' };
                 clockDate.textContent = now.toLocaleDateString('es-ES', options);
             }
-
-            // Iniciar y actualizar el reloj cada segundo
             updateClock();
             setInterval(updateClock, 1000);
 
-            // --- Navegación del menú ---
             navLinks.forEach(link => {
                 link.addEventListener('click', function(e) {
                     e.preventDefault();
                     
-                    // Si es el enlace de "Cerrar Sesión", redirige
-                    if (this.getAttribute('href') === 'Index.html') {
-                        window.location.href = 'Index.html';
-                        return;
-                    }
+                    // --- CORRECCIÓN LÓGICA DE NAVEGACIÓN ---
+                    const pageUrl = this.getAttribute('data-page');
 
-                    // Evita recargar si ya está activo
-                    if (this.classList.contains('active')) return;
-
-                    const page = this.getAttribute('data-page');
-                    if (page) { // Asegurarse de que el link tenga un data-page
-                        contentFrame.src = page;
+                    if (pageUrl) { 
+                        if (this.classList.contains('active')) return; // No recargar si ya está activo
                         
-                        // Quitar clase activa de todos los links de navegación
+                        contentFrame.src = pageUrl;
                         document.querySelectorAll('.nav-menu .nav-link').forEach(l => l.classList.remove('active'));
-                        
-                        // Añadir clase activa al link clickeado
                         this.classList.add('active');
+                    } else if (this.getAttribute('href') === "{{ url_for('index') }}") {
+                        // Manejar cierre de sesión
+                        window.location.href = this.getAttribute('href');
                     }
                 });
             });
