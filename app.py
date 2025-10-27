@@ -275,7 +275,7 @@ def get_ai_classification(message_body):
     """
     
     try:
-        model = genai.GenerativeModel('gemini-1.5-flash') # Modelo actualizado
+        model = genai.GenerativeModel('gemini-2.5-flash') # Modelo actualizado
         response = model.generate_content(system_prompt)
         classified_role = response.text.strip().replace("*", "")
         role_titles = [role.title for role in all_roles] + ["General"]
