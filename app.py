@@ -79,9 +79,7 @@ class BotRole(db.Model):
     status = db.Column(db.String(20), default='Activo', nullable=False)
     chats_received = db.Column(db.Integer, default=0)
     chats_pending = db.Column(db.Integer, default=0)
-    # --- INICIO CORRECCIÓN: Nueva columna ---
     chats_resolved = db.Column(db.Integer, default=0)
-    # --- FIN CORRECCIÓN ---
     assignee = db.relationship('User', back_populates='assigned_roles')
     conversations = db.relationship('Conversation', back_populates='bot_role')
 
@@ -103,20 +101,19 @@ class Conversation(db.Model):
     bot_role_id = db.Column(db.Integer, db.ForeignKey('bot_roles.id'), nullable=False)
     bot_role = db.relationship('BotRole', back_populates='conversations')
     messages = db.relationship('Message', back_populates='conversation', cascade="all, delete-orphan", order_by='Message.timestamp')
-    # --- INICIO CORRECCIÓN: Nuevo campo para saber si ya descontó pendiente ---
-    pending_counted = db.Column(db.Boolean, default=True) # True para nuevos chats, False si ya se descontó
-    # --- FIN CORRECCIÓN ---
+    pending_counted = db.Column(db.Boolean, default=True) # Flag para saber si ya incrementó/decrementó pending
 
     def get_last_message(self):
         if self.messages:
-            return self.messages[-1]
+            # Ordenar por timestamp descendente y tomar el primero si no está pre-ordenado
+            return sorted(self.messages, key=lambda m: m.timestamp, reverse=True)[0]
         return None
 
 class Message(db.Model):
     __tablename__ = 'messages'
     id = db.Column(db.Integer, primary_key=True)
     conversation_id = db.Column(db.Integer, db.ForeignKey('conversations.id'), nullable=False)
-    sender_type = db.Column(db.String(20), nullable=False) # 'user' o 'agent'
+    sender_type = db.Column(db.String(20), nullable=False) # 'user', 'agent', 'system'
     content = db.Column(db.Text, nullable=False)
     timestamp = db.Column(db.DateTime(timezone=True), server_default=func.now())
     conversation = db.relationship('Conversation', back_populates='messages')
@@ -129,42 +126,32 @@ def index():
 @app.route('/menu_admin')
 @login_required
 def menu_admin():
-    if current_user.role != 'Admin':
-        return redirect(url_for('menu_soporte'))
+    if current_user.role != 'Admin': return redirect(url_for('menu_soporte'))
     return render_template('Menu.html')
 
 @app.route('/menu_soporte')
 @login_required
 def menu_soporte():
-    if current_user.role != 'Soporte':
-        return redirect(url_for('menu_admin'))
+    if current_user.role != 'Soporte': return redirect(url_for('menu_admin'))
     return render_template('Menu_Soporte.html')
 
 @app.route('/page/<path:page_name>')
 @login_required
 def show_page(page_name):
-    if not page_name.endswith('.html'):
-        return "Not Found", 404
-    
+    if not page_name.endswith('.html'): return "Not Found", 404
     admin_pages = ['Bot.html', 'Usuarios.html', 'Configuracion.html', 'Dashboard.html']
-    if current_user.role == 'Soporte' and page_name in admin_pages:
-        return redirect(url_for('menu_soporte'))
-    
+    if current_user.role == 'Soporte' and page_name in admin_pages: return redirect(url_for('menu_soporte'))
     return render_template(page_name, current_user=current_user)
 
 # --- API DE LOGIN Y LOGOUT ---
 @app.route('/api/login', methods=['POST'])
 def login():
     data = request.get_json()
-    username = data.get('username')
-    password = data.get('password')
-    user = User.query.filter_by(username=username).first()
-    
-    if user and user.password == password:
+    user = User.query.filter_by(username=data.get('username')).first()
+    if user and user.password == data.get('password'):
         login_user(user)
         redirect_url = url_for('menu_admin' if user.role == 'Admin' else 'menu_soporte')
         return jsonify({"success": True, "redirect_url": redirect_url})
-    
     return jsonify({"success": False, "message": "Usuario o contraseña incorrectos"}), 401
 
 @app.route('/api/logout', methods=['POST'])
@@ -175,21 +162,20 @@ def logout():
 
 # --- APIS DE ADMIN (PROTEGIDAS) ---
 def check_admin():
-    if current_user.role != 'Admin':
-        return jsonify({"error": "No autorizado"}), 403
+    if current_user.role != 'Admin': return jsonify({"error": "No autorizado"}), 403
     return None
 
 @app.route('/api/users', methods=['GET'])
 @login_required
 def get_users():
-    if current_user.role != 'Admin':
-        return jsonify({"error": "No autorizado"}), 403
+    if current_user.role != 'Admin': return jsonify({"error": "No autorizado"}), 403
     users = User.query.all()
-    return jsonify([{'id': user.id, 'name': user.name, 'role': user.role, 'username': user.username} for user in users])
+    return jsonify([{'id': u.id, 'name': u.name, 'role': u.role, 'username': u.username} for u in users])
 
 @app.route('/api/users', methods=['POST'])
 @login_required
 def add_user():
+    # ... (código sin cambios)
     admin_check = check_admin()
     if admin_check: return admin_check
     data = request.get_json()
@@ -211,6 +197,7 @@ def add_user():
 @app.route('/api/users/<int:id>', methods=['PUT'])
 @login_required
 def update_user(id):
+    # ... (código sin cambios)
     admin_check = check_admin()
     if admin_check: return admin_check
     user = User.query.get_or_404(id)
@@ -225,6 +212,7 @@ def update_user(id):
 @app.route('/api/users/<int:id>', methods=['DELETE'])
 @login_required
 def delete_user(id):
+    # ... (código sin cambios)
     admin_check = check_admin()
     if admin_check: return admin_check
     user = User.query.get_or_404(id)
@@ -232,27 +220,36 @@ def delete_user(id):
     db.session.commit()
     return jsonify({'message': 'Usuario eliminado correctamente'})
 
-# --- INICIO CORRECCIÓN: API de Roles ---
 @app.route('/api/bot_roles', methods=['GET'])
 @login_required
 def get_bot_roles():
     admin_check = check_admin()
     if admin_check: return admin_check
-    
     roles = BotRole.query.options(db.joinedload(BotRole.assignee)).all()
-    # Incluir 'chats_resolved' en la respuesta
-    return jsonify([{'id': role.id, 'title': role.title, 'knowledge_base': role.knowledge_base,
-                     'assignee_name': role.assignee.name if role.assignee else 'Sin Asignar',
-                     'assignee_id': role.assignee_id, 'status': role.status,
-                     'chats_received': role.chats_received or 0, # Asegurar 0 si es None
-                     'chats_pending': role.chats_pending or 0,
-                     'chats_resolved': role.chats_resolved or 0 } # Añadido
-                    for role in roles])
+    return jsonify([{'id': r.id, 'title': r.title, 'knowledge_base': r.knowledge_base,
+                     'assignee_name': r.assignee.name if r.assignee else 'Sin Asignar',
+                     'assignee_id': r.assignee_id, 'status': r.status,
+                     'chats_received': r.chats_received or 0, 'chats_pending': r.chats_pending or 0,
+                     'chats_resolved': r.chats_resolved or 0} for r in roles])
+
+# --- INICIO CORRECCIÓN: Nueva API para listar roles (para dropdown) ---
+@app.route('/api/bot_roles/list', methods=['GET'])
+@login_required # Solo usuarios logueados pueden ver la lista
+def get_bot_roles_list():
+    """Devuelve una lista simple de roles activos (id, title) para dropdowns."""
+    try:
+        # Excluir el rol 'General' de las opciones de transferencia? Opcional.
+        roles = BotRole.query.filter(BotRole.status == 'Activo', BotRole.title != 'General').order_by(BotRole.title).all()
+        return jsonify([{'id': r.id, 'title': r.title} for r in roles])
+    except Exception as e:
+        logging.error(f"Error en /api/bot_roles/list: {e}")
+        return jsonify({"error": str(e)}), 500
 # --- FIN CORRECCIÓN ---
 
 @app.route('/api/bot_roles', methods=['POST'])
 @login_required
 def add_bot_role():
+    # ... (código sin cambios, ya devuelve chats_resolved)
     admin_check = check_admin()
     if admin_check: return admin_check
     data = request.get_json()
@@ -264,7 +261,6 @@ def add_bot_role():
     db.session.add(new_role)
     db.session.commit()
     role_data = BotRole.query.get(new_role.id)
-    # Incluir 'chats_resolved' en la respuesta
     return jsonify({'id': role_data.id, 'title': role_data.title, 'knowledge_base': role_data.knowledge_base,
                     'assignee_name': role_data.assignee.name if role_data.assignee else 'Sin Asignar',
                     'assignee_id': role_data.assignee_id, 'status': role_data.status,
@@ -272,9 +268,11 @@ def add_bot_role():
                     'chats_pending': role_data.chats_pending or 0,
                     'chats_resolved': role_data.chats_resolved or 0}), 201
 
+
 @app.route('/api/bot_roles/<int:id>', methods=['PUT'])
 @login_required
 def update_bot_role(id):
+    # ... (código sin cambios)
     admin_check = check_admin()
     if admin_check: return admin_check
     role = BotRole.query.get_or_404(id)
@@ -290,6 +288,7 @@ def update_bot_role(id):
 @app.route('/api/bot_roles/<int:id>', methods=['DELETE'])
 @login_required
 def delete_bot_role(id):
+    # ... (código sin cambios)
     admin_check = check_admin()
     if admin_check: return admin_check
     role = BotRole.query.get_or_404(id)
@@ -300,6 +299,7 @@ def delete_bot_role(id):
 @app.route('/api/bot_config', methods=['GET'])
 @login_required
 def get_bot_config():
+    # ... (código sin cambios)
     admin_check = check_admin()
     if admin_check: return admin_check
     config = BotConfig.query.first()
@@ -312,6 +312,7 @@ def get_bot_config():
 @app.route('/api/bot_config', methods=['PUT'])
 @login_required
 def update_bot_config():
+    # ... (código sin cambios)
     admin_check = check_admin()
     if admin_check: return admin_check
     config = BotConfig.query.first_or_404()
@@ -329,6 +330,7 @@ def create_twilio_response(message_text):
     return str(response)
 
 def get_ai_classification(message_body):
+    # ... (código sin cambios)
     logging.info("Iniciando clasificación con IA...")
     if not genai:
         logging.error("Módulo de IA (Gemini) no está configurado.")
@@ -372,6 +374,7 @@ def get_ai_classification(message_body):
 
 @app.route('/api/whatsapp/webhook', methods=['POST'])
 def whatsapp_webhook():
+    # ... (código sin cambios)
     message_body = request.form.get('Body')
     sender_phone = request.form.get('From')
     if not message_body or not sender_phone:
@@ -388,11 +391,9 @@ def whatsapp_webhook():
             existing_convo.unread_count = (existing_convo.unread_count or 0) + 1
             existing_convo.updated_at = datetime.utcnow()
             role = existing_convo.bot_role
-            # --- INICIO CORRECCIÓN: Incrementar pendiente solo si no lo estaba ya ---
             if role and not existing_convo.pending_counted:
                 role.chats_pending = (role.chats_pending or 0) + 1
-                existing_convo.pending_counted = True # Marcar que ya se contó como pendiente
-            # --- FIN CORRECCIÓN ---
+                existing_convo.pending_counted = True
             db.session.commit()
             return ('', 200)
     except Exception as e:
@@ -422,9 +423,7 @@ def whatsapp_webhook():
              return ('Error interno del servidor', 500)
 
     try:
-        # --- INICIO CORRECCIÓN: Asegurar pending_counted=True al crear ---
         convo = Conversation(user_phone=sender_phone, bot_role_id=target_role.id, status='open', pending_counted=True)
-        # --- FIN CORRECCIÓN ---
         db.session.add(convo)
         db.session.flush()
         new_message = Message(conversation_id=convo.id, sender_type='user', content=message_body)
@@ -444,14 +443,11 @@ def whatsapp_webhook():
         return ('Error interno del servidor', 500)
 
 
-
+# --- APIS DE CHAT (PROTEGIDAS Y FILTRADAS) ---
 @app.route('/api/chats', methods=['GET'])
 @login_required
 def get_chats():
-    """
-    Obtiene la lista de chats activos FILTRADA para el usuario logueado.
-    Ahora incluye 'updated_at' para el polling.
-    """
+    # ... (código sin cambios)
     try:
         open_conversations = []
         if current_user.role == 'Admin':
@@ -473,51 +469,43 @@ def get_chats():
         chat_list = []
         for convo in open_conversations:
             last_msg = convo.get_last_message()
-            # --- INICIO CORRECCIÓN ---
             chat_list.append({
                 "id": convo.id,
                 "name": convo.user_phone.replace('whatsapp:', ''),
                 "phone": convo.user_phone.replace('whatsapp:', ''),
                 "time": last_msg.timestamp.strftime("%I:%M %p") if last_msg and last_msg.timestamp else 'N/A',
-                "unread": convo.unread_count or 0, # Asegurar 0 si es null
+                "unread": convo.unread_count or 0,
                 "last_message": last_msg.content if last_msg else "Sin mensajes",
-                "updated_at": convo.updated_at.isoformat() if convo.updated_at else convo.created_at.isoformat() # Añadir timestamp ISO
+                "updated_at": convo.updated_at.isoformat() if convo.updated_at else convo.created_at.isoformat()
             })
-            # --- FIN CORRECCIÓN ---
         return jsonify(chat_list)
     except Exception as e:
         logging.error(f"Error en /api/chats: {e}")
         return jsonify({"error": str(e)}), 500
 
-
-
 @app.route('/api/chats/<int:convo_id>/messages', methods=['GET'])
 @login_required
 def get_chat_messages(convo_id):
+    # ... (código sin cambios)
     convo = Conversation.query.get_or_404(convo_id)
     if current_user.role != 'Admin':
         assigned_role_ids = [role.id for role in current_user.assigned_roles]
         if convo.bot_role_id not in assigned_role_ids:
             return jsonify({"error": "No autorizado para ver este chat"}), 403
-            
-    # --- INICIO CORRECCIÓN: Lógica mejorada de pendientes ---
-    # Solo descontar pendiente si tenía mensajes sin leer Y si estaba contado como pendiente
     if convo.unread_count > 0 and convo.pending_counted:
         role = convo.bot_role
         if role and role.chats_pending > 0:
             role.chats_pending = role.chats_pending - 1
-            convo.pending_counted = False # Marcar que ya se descontó
-    # --- FIN CORRECCIÓN ---
-    
+            convo.pending_counted = False
     convo.unread_count = 0
     db.session.commit()
-    
     messages = [{"sender": msg.sender_type, "text": msg.content} for msg in convo.messages]
     return jsonify(messages)
 
 @app.route('/api/chats/<int:convo_id>/messages', methods=['POST'])
 @login_required
 def send_chat_message(convo_id):
+    # ... (código sin cambios)
     convo = Conversation.query.get_or_404(convo_id)
     if current_user.role != 'Admin':
         assigned_role_ids = [role.id for role in current_user.assigned_roles]
@@ -525,8 +513,7 @@ def send_chat_message(convo_id):
             return jsonify({"error": "No autorizado para enviar a este chat"}), 403
     data = request.get_json()
     content = data.get('text')
-    if not content:
-        return jsonify({"error": "El texto no puede estar vacío"}), 400
+    if not content: return jsonify({"error": "El texto no puede estar vacío"}), 400
     if not twilio_client or not TWILIO_WHATSAPP_NUMBER:
         logging.error("Twilio no está configurado para enviar mensajes.")
         return jsonify({"error": "El servicio de envío no está configurado"}), 500
@@ -542,40 +529,99 @@ def send_chat_message(convo_id):
         db.session.rollback()
         return jsonify({"error": str(e)}), 500
 
-# --- INICIO CORRECCIÓN: API para resolver chat ---
+
 @app.route('/api/chats/<int:convo_id>/resolve', methods=['POST'])
 @login_required
 def resolve_chat(convo_id):
+    # ... (código sin cambios)
     convo = Conversation.query.get_or_404(convo_id)
     if current_user.role != 'Admin':
         assigned_role_ids = [role.id for role in current_user.assigned_roles]
         if convo.bot_role_id not in assigned_role_ids:
             return jsonify({"error": "No autorizado para resolver este chat"}), 403
-            
     try:
         convo.status = 'closed'
         role = convo.bot_role
         if role:
-            # Incrementar resueltos
             role.chats_resolved = (role.chats_resolved or 0) + 1
-            # Decrementar pendientes SOLO si no se descontó ya al leerlo
             if convo.pending_counted and role.chats_pending > 0:
                 role.chats_pending = role.chats_pending - 1
-                convo.pending_counted = False # Asegurar que no se descuente de nuevo
-
+                convo.pending_counted = False
         db.session.commit()
-        logging.info(f"Chat ID {convo_id} marcado como resuelto. Rol '{role.title}' - Pendientes: {role.chats_pending}, Resueltos: {role.chats_resolved}")
+        logging.info(f"Chat ID {convo_id} marcado como resuelto. Rol '{role.title if role else 'N/A'}' - Pendientes: {role.chats_pending if role else 'N/A'}, Resueltos: {role.chats_resolved if role else 'N/A'}")
         return jsonify({"success": True, "message": "Chat archivado."})
     except Exception as e:
         db.session.rollback()
         logging.error(f"Error al resolver chat {convo_id}: {e}")
         return jsonify({"error": str(e)}), 500
+
+# --- INICIO CORRECCIÓN: Nueva API para transferir chat ---
+@app.route('/api/chats/<int:convo_id>/transfer', methods=['POST'])
+@login_required
+def transfer_chat(convo_id):
+    """Transfiere una conversación a un nuevo rol."""
+    convo = Conversation.query.get_or_404(convo_id)
+    data = request.get_json()
+    target_role_id = data.get('target_role_id')
+
+    if not target_role_id:
+        return jsonify({"error": "Falta el ID del rol de destino"}), 400
+
+    # Seguridad: Solo Admin o el asignado actual pueden transferir? Por ahora, solo logueado.
+    # Podríamos añadir lógica más compleja si fuera necesario.
+    if current_user.role != 'Admin':
+         assigned_role_ids = [role.id for role in current_user.assigned_roles]
+         if convo.bot_role_id not in assigned_role_ids:
+             return jsonify({"error": "No autorizado para transferir este chat"}), 403
+
+    try:
+        original_role = convo.bot_role
+        target_role = BotRole.query.get(target_role_id)
+
+        if not target_role:
+            return jsonify({"error": "Rol de destino no encontrado"}), 404
+        if original_role and original_role.id == target_role.id:
+            return jsonify({"error": "No se puede transferir al mismo rol"}), 400
+
+        # Ajustar contadores
+        if original_role:
+            # Decrementar pendiente del rol original SOLO si estaba contado
+            if convo.pending_counted and original_role.chats_pending > 0:
+                original_role.chats_pending = original_role.chats_pending - 1
+        
+        # Incrementar pendiente del nuevo rol
+        target_role.chats_pending = (target_role.chats_pending or 0) + 1
+        
+        # Actualizar la conversación
+        convo.bot_role_id = target_role.id
+        convo.pending_counted = True # Marcar como pendiente para el nuevo rol
+        convo.updated_at = datetime.utcnow() # Actualizar timestamp
+        
+        # Opcional: Añadir mensaje de sistema
+        system_message = Message(
+            conversation_id=convo.id,
+            sender_type='system', # Nuevo tipo de remitente
+            content=f"Chat transferido de '{original_role.title if original_role else 'N/A'}' a '{target_role.title}' por {current_user.name}."
+        )
+        db.session.add(system_message)
+        
+        db.session.commit()
+        logging.info(f"Chat ID {convo_id} transferido de Rol ID {original_role.id if original_role else 'N/A'} a Rol ID {target_role.id}.")
+        
+        return jsonify({"success": True, "message": "Chat transferido correctamente."})
+
+    except Exception as e:
+        db.session.rollback()
+        logging.error(f"Error al transferir chat {convo_id}: {e}")
+        return jsonify({"error": str(e)}), 500
 # --- FIN CORRECCIÓN ---
 
-# --- API DE DASHBOARD (PROTEGIDA Y FILTRADA) ---
+
+# --- APIs DE DASHBOARD (sin cambios) ---
 @app.route('/api/dashboard/soporte')
 @login_required
 def get_soporte_dashboard_data():
+    # ... (código sin cambios)
     try:
         assigned_role_ids = []
         if current_user.role == 'Admin':
@@ -610,6 +656,7 @@ def get_soporte_dashboard_data():
 @app.route('/api/dashboard/admin')
 @login_required
 def get_admin_dashboard_data():
+    # ... (código sin cambios)
     admin_check = check_admin()
     if admin_check: return admin_check
     try:
@@ -617,10 +664,7 @@ def get_admin_dashboard_data():
         start_of_today = datetime(today.year, today.month, today.day)
         stats_asistentes_activos = User.query.filter_by(role='Soporte').count()
         stats_chats_hoy = Conversation.query.filter(Conversation.created_at >= start_of_today).count()
-        # --- INICIO CORRECCIÓN: Usar la nueva columna ---
-        # stats_chats_resueltos = Conversation.query.filter_by(status='closed').count() # Forma antigua
-        stats_chats_resueltos = db.session.query(func.sum(BotRole.chats_resolved)).scalar() or 0 # Suma de todos los roles
-        # --- FIN CORRECCIÓN ---
+        stats_chats_resueltos = db.session.query(func.sum(BotRole.chats_resolved)).scalar() or 0
         labels = []
         data = []
         for i in range(6, -1, -1):
@@ -647,14 +691,14 @@ def get_admin_dashboard_data():
         logging.error(f"Error en /api/dashboard/admin: {e}")
         return jsonify({"error": str(e)}), 500
 
+
 # --- INICIALIZACIÓN DE LA APLICACIÓN ---
 def init_db(app_instance):
+    # ... (código sin cambios)
     with app_instance.app_context():
         try:
             db.create_all()
-            logging.info("Tablas de la base de datos verificadas/creadas (con chats_resolved).")
-            # Crear datos por defecto (usuarios, config, roles) si no existen...
-            # (Omitido por brevedad, es el mismo código de antes)
+            logging.info("Tablas de la base de datos verificadas/creadas.")
             if not User.query.filter_by(role='Admin').first():
                 logging.info("Creando usuario 'admin' por defecto.")
                 db.session.add(User(username='admin', password='admin', name='Administrador', role='Admin'))
@@ -665,15 +709,10 @@ def init_db(app_instance):
                 logging.info("Creando configuración de bot por defecto.")
                 db.session.add(BotConfig(is_active=True, whatsapp_number="+573132217862", welcome_message="¡Hola! Bienvenido a nuestro servicio de atención. ¿En qué puedo ayudarte hoy?"))
             roles_default = {
-                "Area Cotizaciones": "Es el cotizador de negocios que permite a cualquier usuario obtener un precio de seguro al instante.",
-                "Renovaciones": "De manera proactiva, este módulo se encarga de mantener a los clientes. Notifica sobre el próximo vencimiento de su póliza.",
-                "Agente de ventas/Comercial #1": "Este módulo actúa como el primer contacto para atraer nuevos clientes. Identifica las necesidades del usuario.",
-                "Agente de ventas/Comercial #2": "Módulo de primer contacto para nuevos clientes, similar al #1 pero con otro agente.",
-                "Agente de ventas/Comercial #3": "Módulo de primer contacto para nuevos clientes, similar al #1 pero con otro agente.",
-                "Siniestros, Consultas Póliza, Cancelaciones": "Diseñado para asistir al cliente en momentos difíciles, reportar incidentes, consultar estado de su caso y gestionar cancelaciones.",
-                "Ventas": "Consultas sobre compra de seguros, cotizaciones, precios, planes de vehículos (carros, motos) y procesos de adquisición.",
-                "Soporte Técnico": "Problemas con la plataforma, la app no funciona, errores de sistema, facturación, problemas de conexión y ayuda general.",
-                "General": "Preguntas frecuentes generales, saludos, despedidas o consultas que no encajan en otras áreas."
+                "Area Cotizaciones": "Es el cotizador de negocios...", "Renovaciones": "De manera proactiva...",
+                "Agente de ventas/Comercial #1": "Este módulo actúa como...", "Agente de ventas/Comercial #2": "Módulo de primer contacto...",
+                "Agente de ventas/Comercial #3": "Módulo de primer contacto...", "Siniestros, Consultas Póliza, Cancelaciones": "Diseñado para asistir...",
+                "Ventas": "Consultas sobre compra...", "Soporte Técnico": "Problemas con la plataforma...", "General": "Preguntas frecuentes..."
             }
             for title, knowledge in roles_default.items():
                 if not BotRole.query.filter_by(title=title).first():
