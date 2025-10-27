@@ -7,16 +7,14 @@
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <style>
         :root {
-            /* --- INICIO DE LA MODIFICACIÓN: Paleta de Grises --- */
             --card-bg: rgba(255, 255, 255, 0.85);
             --text-primary: #111827;
             --text-secondary: #4B5563;
             --border-color: rgba(255, 255, 255, 0.5);
             --shadow-color: rgba(0, 0, 0, 0.1);
-            --accent-color: #2D3748; /* Gris Carbón Oscuro */
+            --accent-color: #2D3748; 
             --accent-hover: #4A5568;
-            --icon-box-bg: #9CA3AF; /* Gris neutro para las cajas de íconos */
-            /* --- FIN DE LA MODIFICACIÓN --- */
+            --icon-box-bg: #9CA3AF;
         }
         body {
             background-image: url('https://i.postimg.cc/pLqCVDFx/Chat-GPT-Image-19-sept-2025-18-11-46.png');
@@ -99,9 +97,9 @@
 
     <div class="dashboard-container">
         <div class="dashboard-header">
-            <h1>Dashboard de Soporte Técnico Nivel 1</h1>
-            <p>Rendimiento y volumen de mensajes gestionados.</p>
-        </div>
+            <h1>Dashboard de {{ current_user.name }}</h1>
+            <p>Rendimiento y volumen de mensajes para los roles que tienes asignados.</p>
+            </div>
 
         <div class="dashboard-grid">
             <div class="stat-card">
@@ -122,7 +120,7 @@
                 <div class="chart-wrapper"><canvas id="chatsPerDayChart"></canvas></div>
             </div>
             <div class="chart-card bar-chart-container">
-                <h2>Motivos de Consulta (por Rol)</h2>
+                <h2>Chats por Rol Asignado</h2>
                 <div class="chart-wrapper"><canvas id="chatsByTopicChart"></canvas></div>
             </div>
         </div>
@@ -170,34 +168,38 @@
                             borderRadius: 6
                         }]
                     },
-                    options: { responsive: true, maintainAspectRatio: false, indexAxis: 'y', scales: { x: { beginAtZero: true } }, plugins: { legend: { display: false } } }
+                    // Gráfico de barras ahora es vertical
+                    options: { responsive: true, maintainAspectRatio: false, scales: { y: { beginAtZero: true } }, plugins: { legend: { display: false } } }
                 });
             };
             
             const loadDashboardData = async () => {
                 try {
+                    // Esta API ahora filtra automáticamente los datos para el usuario logueado
                     const response = await fetch('/api/dashboard/soporte');
                     if(!response.ok) throw new Error('Error al cargar datos del dashboard');
                     const data = await response.json();
                     
-                    // Llenar tarjetas
                     document.getElementById('stats-today').textContent = data.stats.today;
                     document.getElementById('stats-week').textContent = data.stats.week;
                     document.getElementById('stats-month').textContent = data.stats.month;
                     
-                    // Renderizar gráficos
                     renderLineChart(data.lineChart.labels, data.lineChart.data);
-                    renderBarChart(data.barChart.labels, data.barChart.data);
+                    
+                    // Si no hay datos de roles, muestra un mensaje
+                    if(data.barChart.labels.length === 0) {
+                         document.getElementById('chatsByTopicChart').parentElement.innerHTML = '<p style="text-align: center; color: var(--text-secondary); padding-top: 50px;">No tienes roles de bot asignados.</p>';
+                    } else {
+                        renderBarChart(data.barChart.labels, data.barChart.data);
+                    }
                     
                 } catch (error) {
                     console.error(error);
-                    // Dejar los gráficos con datos de ejemplo si falla la API
                     renderLineChart(['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom'], [0, 0, 0, 0, 0, 0, 0]);
                     renderBarChart(['Error'], [0]);
                 }
             };
             
-            // Carga inicial
             loadDashboardData();
         });
     </script>

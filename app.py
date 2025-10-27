@@ -9,7 +9,7 @@ from twilio.rest import Client
 from datetime import datetime, timedelta
 from sqlalchemy import func
 
-# --- NUEVAS IMPORTACIONES PARA SESIONES ---
+# --- IMPORTACIONES DE SESIONES ---
 from flask_login import LoginManager, UserMixin, login_user, logout_user, login_required, current_user
 
 # --- CONFIGURACIÓN ---
@@ -45,25 +45,22 @@ if db_uri and db_uri.startswith("postgres://"):
 
 app.config['SQLALCHEMY_DATABASE_URI'] = db_uri
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
-app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', 'una-clave-secreta-muy-segura') # CRÍTICO para sesiones
+app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', 'una-clave-secreta-muy-segura')
 
 db = SQLAlchemy(app)
 
-# --- CONFIGURACIÓN DE FLASK-LOGIN (NUEVO) ---
+# --- CONFIGURACIÓN DE FLASK-LOGIN ---
 login_manager = LoginManager()
 login_manager.init_app(app)
-login_manager.login_view = 'index' # Redirige a '/' si se intenta acceder a una pág. protegida
+login_manager.login_view = 'index'
 login_manager.login_message = "Por favor, inicia sesión para acceder."
 login_manager.login_message_category = "info"
 
 @login_manager.user_loader
 def load_user(user_id):
-    """Función requerida por Flask-Login para cargar un usuario desde la sesión."""
     return User.query.get(int(user_id))
 
 # --- MODELOS DE LA BASE DE DATOS ---
-
-# UserMixin añade los métodos requeridos por Flask-Login (is_authenticated, etc.)
 class User(db.Model, UserMixin): 
     __tablename__ = 'users'
     id = db.Column(db.Integer, primary_key=True)
@@ -71,20 +68,20 @@ class User(db.Model, UserMixin):
     password = db.Column(db.String(256), nullable=False)
     name = db.Column(db.String(120), nullable=False)
     role = db.Column(db.String(80), nullable=False) # "Admin" o "Soporte"
+    # Relación: Un usuario (agente) puede tener MÚLTIPLES roles de bot asignados
+    assigned_roles = db.relationship('BotRole', back_populates='assignee')
 
 class BotRole(db.Model):
     __tablename__ = 'bot_roles'
     id = db.Column(db.Integer, primary_key=True)
     title = db.Column(db.String(120), unique=True, nullable=False)
     knowledge_base = db.Column(db.Text, nullable=True)
-    assignee_id = db.Column(db.Integer, db.ForeignKey('users.id', ondelete='SET NULL'), nullable=True)
+    assignee_id = db.Column(db.Integer, db.ForeignKey('users.id', ondelete='SET NULL'), nullable=True) # A qué User ID está asignado
     status = db.Column(db.String(20), default='Activo', nullable=False)
     chats_received = db.Column(db.Integer, default=0)
     chats_pending = db.Column(db.Integer, default=0)
     
-    # Esta relación ahora es 'assignee' (el usuario asignado)
-    assignee = db.relationship('User', backref='assigned_roles') # 'assigned_roles' nos da los roles de un usuario
-    
+    assignee = db.relationship('User', back_populates='assigned_roles') # El objeto User
     conversations = db.relationship('Conversation', back_populates='bot_role')
 
 class BotConfig(db.Model):
@@ -123,34 +120,39 @@ class Message(db.Model):
 # --- RUTAS BÁSICAS (PROTEGIDAS) ---
 @app.route('/')
 def index():
+    if current_user.is_authenticated:
+        redirect_url = url_for('menu_admin' if current_user.role == 'Admin' else 'menu_soporte')
+        return redirect(redirect_url)
     return render_template('Index.html')
 
 @app.route('/menu_admin')
-@login_required # Proteger ruta
+@login_required
 def menu_admin():
     if current_user.role != 'Admin':
         return redirect(url_for('menu_soporte'))
     return render_template('Menu.html')
 
 @app.route('/menu_soporte')
-@login_required # Proteger ruta
+@login_required
 def menu_soporte():
     if current_user.role != 'Soporte':
         return redirect(url_for('menu_admin'))
     return render_template('Menu_Soporte.html')
 
+# --- INICIO DE LA CORRECCIÓN ---
 @app.route('/page/<path:page_name>')
-@login_required # Proteger todas las subpáginas
+@login_required
 def show_page(page_name):
     if not page_name.endswith('.html'):
         return "Not Found", 404
     
-    # Seguridad extra: un 'Soporte' no puede pedir páginas de 'Admin'
     admin_pages = ['Bot.html', 'Usuarios.html', 'Configuracion.html', 'Dashboard.html']
     if current_user.role == 'Soporte' and page_name in admin_pages:
         return redirect(url_for('menu_soporte'))
-
-    return render_template(page_name)
+    
+    # Aquí pasamos la variable 'current_user' a la plantilla
+    return render_template(page_name, current_user=current_user) 
+# --- FIN DE LA CORRECCIÓN ---
 
 # --- API DE LOGIN Y LOGOUT ---
 @app.route('/api/login', methods=['POST'])
@@ -160,23 +162,21 @@ def login():
     password = data.get('password')
     user = User.query.filter_by(username=username).first()
     
-    if user and user.password == password: # Idealmente, usar hashing
-        login_user(user) # <-- ¡Magia de Flask-Login! Inicia la sesión.
+    if user and user.password == password:
+        login_user(user) 
         redirect_url = url_for('menu_admin' if user.role == 'Admin' else 'menu_soporte')
         return jsonify({"success": True, "redirect_url": redirect_url})
     
     return jsonify({"success": False, "message": "Usuario o contraseña incorrectos"}), 401
 
 @app.route('/api/logout', methods=['POST'])
-@login_required # Solo un usuario logueado puede desloguearse
+@login_required
 def logout():
-    logout_user() # <-- Cierra la sesión
+    logout_user() 
     return jsonify({"success": True, "redirect_url": url_for('index')})
-
 
 # --- APIS DE ADMIN (PROTEGIDAS) ---
 def check_admin():
-    """Función helper para verificar si el usuario es Admin."""
     if current_user.role != 'Admin':
         return jsonify({"error": "No autorizado"}), 403
     return None
@@ -184,9 +184,13 @@ def check_admin():
 @app.route('/api/users', methods=['GET'])
 @login_required
 def get_users():
-    admin_check = check_admin()
-    if admin_check: return admin_check
-    
+    # Esta API es llamada por Usuarios.html y Bot.html (para el dropdown)
+    # No podemos bloquearla solo para Admin si Bot.html la necesita.
+    # Pero Bot.html SÓLO es accesible por el Admin.
+    if current_user.role != 'Admin':
+        # Un agente de soporte no debería poder listar usuarios.
+        return jsonify({"error": "No autorizado"}), 403
+        
     users = User.query.all()
     return jsonify([{'id': user.id, 'name': user.name, 'role': user.role, 'username': user.username} for user in users])
 
@@ -297,7 +301,6 @@ def get_bot_config():
     if admin_check: return admin_check
     
     config = BotConfig.query.first()
-    # ... (código de creación de config por defecto)
     if not config:
         config = BotConfig(is_active=True, whatsapp_number="+573132217862", welcome_message="¡Hola! Bienvenido a nuestro servicio de atención. ¿En qué puedo ayudarte hoy?")
         db.session.add(config)
@@ -320,7 +323,6 @@ def update_bot_config():
     return jsonify({'message': 'Configuración del bot actualizada correctamente'})
 
 # --- LÓGICA DEL WEBHOOK (PÚBLICO) ---
-# El webhook NO puede estar protegido, ya que Twilio debe poder llamarlo.
 def create_twilio_response(message_text):
     response = MessagingResponse()
     response.message(message_text)
@@ -434,18 +436,13 @@ def whatsapp_webhook():
 # --- APIS DE CHAT (PROTEGIDAS Y FILTRADAS) ---
 
 @app.route('/api/chats', methods=['GET'])
-@login_required # Proteger
+@login_required
 def get_chats():
-    """
-    Obtiene la lista de chats activos FILTRADA para el usuario logueado.
-    """
     try:
         open_conversations = []
         if current_user.role == 'Admin':
-            # El Admin ve todos los chats abiertos
             open_conversations = Conversation.query.filter_by(status='open').order_by(Conversation.updated_at.desc()).all()
         else:
-            # El Soporte solo ve los chats de sus roles asignados
             assigned_role_ids = [role.id for role in current_user.assigned_roles]
             if assigned_role_ids:
                 open_conversations = Conversation.query.filter(
@@ -472,11 +469,10 @@ def get_chats():
         return jsonify({"error": str(e)}), 500
 
 @app.route('/api/chats/<int:convo_id>/messages', methods=['GET'])
-@login_required # Proteger
+@login_required
 def get_chat_messages(convo_id):
     convo = Conversation.query.get_or_404(convo_id)
     
-    # Seguridad: El usuario solo puede ver chats de sus roles (o si es Admin)
     if current_user.role != 'Admin':
         assigned_role_ids = [role.id for role in current_user.assigned_roles]
         if convo.bot_role_id not in assigned_role_ids:
@@ -489,11 +485,10 @@ def get_chat_messages(convo_id):
     return jsonify(messages)
 
 @app.route('/api/chats/<int:convo_id>/messages', methods=['POST'])
-@login_required # Proteger
+@login_required
 def send_chat_message(convo_id):
     convo = Conversation.query.get_or_404(convo_id)
     
-    # Seguridad: El usuario solo puede enviar chats de sus roles (o si es Admin)
     if current_user.role != 'Admin':
         assigned_role_ids = [role.id for role in current_user.assigned_roles]
         if convo.bot_role_id not in assigned_role_ids:
@@ -517,7 +512,7 @@ def send_chat_message(convo_id):
         
         new_message = Message(
             conversation_id=convo.id,
-            sender_type='agent', # 'agent' es el agente de soporte
+            sender_type='agent',
             content=content
         )
         db.session.add(new_message)
@@ -532,11 +527,10 @@ def send_chat_message(convo_id):
         return jsonify({"error": str(e)}), 500
 
 @app.route('/api/chats/<int:convo_id>/resolve', methods=['POST'])
-@login_required # Proteger
+@login_required
 def resolve_chat(convo_id):
     convo = Conversation.query.get_or_404(convo_id)
     
-    # Seguridad: El usuario solo puede resolver chats de sus roles (o si es Admin)
     if current_user.role != 'Admin':
         assigned_role_ids = [role.id for role in current_user.assigned_roles]
         if convo.bot_role_id not in assigned_role_ids:
@@ -556,22 +550,16 @@ def resolve_chat(convo_id):
 
 # --- API DE DASHBOARD (PROTEGIDA Y FILTRADA) ---
 @app.route('/api/dashboard/soporte')
-@login_required # Proteger
+@login_required
 def get_soporte_dashboard_data():
-    """
-    Proporciona datos reales para Dashboard_Soporte.html, FILTRADOS por usuario.
-    """
     try:
         assigned_role_ids = []
         if current_user.role == 'Admin':
-            # El Admin ve todos los roles
             assigned_role_ids = [role.id for role in BotRole.query.all()]
         else:
-            # El Soporte solo ve sus roles
             assigned_role_ids = [role.id for role in current_user.assigned_roles]
 
         if not assigned_role_ids:
-            # Si no tiene roles, devuelve data vacía
             return jsonify({"stats": {"today": 0, "week": 0, "month": 0}, "lineChart": {"labels": [], "data": []}, "barChart": {"labels": [], "data": []}})
         
         today = datetime.utcnow().date()
@@ -579,7 +567,6 @@ def get_soporte_dashboard_data():
         start_of_week = start_of_today - timedelta(days=today.weekday())
         start_of_month = datetime(today.year, today.month, 1)
 
-        # 1. Tarjetas (Filtradas por roles asignados)
         messages_today = Message.query.join(Conversation).filter(
             Message.timestamp >= start_of_today,
             Conversation.bot_role_id.in_(assigned_role_ids)
@@ -593,7 +580,6 @@ def get_soporte_dashboard_data():
             Conversation.bot_role_id.in_(assigned_role_ids)
         ).count()
 
-        # 2. Gráfico de líneas (Filtrado)
         labels = []
         data = []
         for i in range(6, -1, -1):
@@ -609,7 +595,6 @@ def get_soporte_dashboard_data():
         
         line_chart = {"labels": labels, "data": data}
 
-        # 3. Gráfico de barras (Filtrado)
         role_data = db.session.query(
             BotRole.title, func.count(Conversation.id)
         ).join(Conversation, BotRole.id == Conversation.bot_role_id)\
@@ -637,7 +622,6 @@ def init_db(app_instance):
             db.create_all()
             logging.info("Tablas de la base de datos verificadas/creadas.")
             
-            # ... (código de creación de usuarios, config y roles por defecto) ...
             if not User.query.filter_by(role='Admin').first():
                 logging.info("Creando usuario 'admin' por defecto.")
                 db.session.add(User(username='admin', password='admin', name='Administrador', role='Admin'))
