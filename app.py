@@ -116,12 +116,8 @@ class Message(db.Model):
     conversation = db.relationship('Conversation', back_populates='messages')
 
 # --- RUTAS BÁSICAS (PROTEGIDAS) ---
-
 @app.route('/')
 def index():
-    # Esta ruta SIEMPRE debe mostrar la página de login.
-    # Si un usuario ya logueado la visita, verá el login de nuevo,
-    # lo cual es el comportamiento esperado para una página de inicio.
     return render_template('Index.html')
 
 @app.route('/menu_admin')
@@ -353,9 +349,6 @@ def get_ai_classification(message_body):
     """
     
     try:
-        # --- CORRECCIÓN DE MODELO ---
-        # Tu log de instalación muestra google-generativeai-0.8.5. 
-        # 'gemini-2.5-flash' no existe. 'gemini-1.5-flash' es el correcto.
         model = genai.GenerativeModel('gemini-2.5-flash') 
         response = model.generate_content(system_prompt)
         classified_role = response.text.strip().replace("*", "")
@@ -370,7 +363,6 @@ def get_ai_classification(message_body):
         logging.error(f"Error en la llamada a la API de Gemini: {e}")
         return "General"
 
-# --- INICIO DE LA CORRECCIÓN DE LÓGICA ---
 @app.route('/api/whatsapp/webhook', methods=['POST'])
 def whatsapp_webhook():
     message_body = request.form.get('Body')
@@ -383,19 +375,14 @@ def whatsapp_webhook():
     logging.info(f"Mensaje recibido de {sender_phone}: {message_body}")
 
     try:
-        # 1. BUSCAR CONVERSACIÓN ACTIVA
-        # Buscamos si este usuario ya tiene un chat en estado 'open'
         existing_convo = Conversation.query.filter_by(
             user_phone=sender_phone, 
             status='open'
         ).first()
 
         if existing_convo:
-            # ¡SÍ! El usuario ya está hablando con un agente.
-            # El bot NO debe responder.
             logging.info(f"Conversación abierta (ID: {existing_convo.id}) encontrada para {sender_phone}. Omitiendo IA.")
             
-            # Solo guardamos el mensaje en la conversación existente
             new_message = Message(
                 conversation_id=existing_convo.id,
                 sender_type='user', 
@@ -403,17 +390,18 @@ def whatsapp_webhook():
             )
             db.session.add(new_message)
             
-            # Actualizamos contadores para notificar al agente
             existing_convo.unread_count = (existing_convo.unread_count or 0) + 1
             existing_convo.updated_at = datetime.utcnow()
             
             role = existing_convo.bot_role
             if role:
-                role.chats_pending = (role.chats_pending or 0) + 1
+                # Actualizamos 'pendientes' solo si estaba en 0, para no inflar el contador
+                # La lógica de reducirlo se hace en get_chat_messages
+                if existing_convo.unread_count == 1:
+                     role.chats_pending = (role.chats_pending or 0) + 1
             
             db.session.commit()
             
-            # Respondemos 200 OK a Twilio para que no haga nada más.
             return ('', 200)
 
     except Exception as e:
@@ -421,8 +409,6 @@ def whatsapp_webhook():
         logging.error(f"Error al buscar/guardar en conversación existente: {e}")
         return ('Error interno del servidor', 500)
         
-    # 2. SI LLEGAMOS AQUÍ, ES UN MENSAJE NUEVO (no hay chat abierto)
-    # Continuamos con la lógica de IA
     logging.info(f"No hay conversación abierta para {sender_phone}. Pasando a IA.")
 
     bot_config = BotConfig.query.first()
@@ -430,18 +416,14 @@ def whatsapp_webhook():
         logging.info("Bot inactivo. Ignorando mensaje.")
         return ('', 200)
 
-    # 3. CLASIFICAR MENSAJE NUEVO
     role_title = get_ai_classification(message_body)
     
     if role_title == 'General':
-        # Es un saludo, solo respondemos el saludo. No creamos chat.
         logging.info("Intención 'General' detectada. Enviando saludo.")
         welcome_message = bot_config.welcome_message or "¡Hola! ¿En qué puedo ayudarte hoy?"
         response_twiml = create_twilio_response(welcome_message)
         return response_twiml, 200, {'Content-Type': 'application/xml'}
 
-    # 4. CREAR NUEVA CONVERSACIÓN
-    # La IA detectó una intención (ej: 'Ventas', 'Renovaciones')
     target_role = BotRole.query.filter_by(title=role_title).first()
     if not target_role:
         logging.warning(f"IA devolvió '{role_title}' pero no se encontró en BD. Asignando a 'General'.")
@@ -451,25 +433,21 @@ def whatsapp_webhook():
              return ('Error interno del servidor', 500)
 
     try:
-        # Creamos la conversación y guardamos el primer mensaje
         convo = Conversation(user_phone=sender_phone, bot_role_id=target_role.id, status='open')
         db.session.add(convo)
-        # Necesitamos hacer flush para obtener el convo.id antes de crear el mensaje
         db.session.flush() 
 
         new_message = Message(conversation_id=convo.id, sender_type='user', content=message_body)
         db.session.add(new_message)
         
-        # Actualizamos contadores
         target_role.chats_received = (target_role.chats_received or 0) + 1
         target_role.chats_pending = (target_role.chats_pending or 0) + 1
-        convo.unread_count = 1 # Es el primer mensaje
+        convo.unread_count = 1
         convo.updated_at = datetime.utcnow()
         
         db.session.commit()
         logging.info(f"NUEVA conversación creada (ID: {convo.id}) y asignada a '{target_role.title}'.")
         
-        # Respondemos al usuario que fue transferido
         transfer_message = f"¡Entendido! Un agente del área de {target_role.title} te atenderá pronto."
         response_twiml = create_twilio_response(transfer_message)
         return response_twiml, 200, {'Content-Type': 'application/xml'}
@@ -478,7 +456,6 @@ def whatsapp_webhook():
         db.session.rollback()
         logging.error(f"Error al crear nueva conversación y guardar mensaje: {e}")
         return ('Error interno del servidor', 500)
-# --- FIN DE LA CORRECCIÓN DE LÓGICA ---
 
 
 # --- APIS DE CHAT (PROTEGIDAS Y FILTRADAS) ---
@@ -525,16 +502,13 @@ def get_chat_messages(convo_id):
         if convo.bot_role_id not in assigned_role_ids:
             return jsonify({"error": "No autorizado para ver este chat"}), 403
             
-    # Marcar como leído
-    convo.unread_count = 0
-    # Resetear el 'pending' del rol si el agente abre el chat
-    role = convo.bot_role
-    if role and role.chats_pending > 0:
-        # Esta lógica es simple, asume que 1 chat = 1 pendiente.
-        # Una lógica más compleja contaría chats únicos pendientes por rol.
-        # Por ahora, reducimos en 1 al ser leído.
-        role.chats_pending = role.chats_pending - 1
+    # Lógica para reducir el contador de pendientes
+    if convo.unread_count > 0:
+        role = convo.bot_role
+        if role and role.chats_pending > 0:
+            role.chats_pending = role.chats_pending - 1
     
+    convo.unread_count = 0
     db.session.commit()
     
     messages = [{"sender": msg.sender_type, "text": msg.content} for msg in convo.messages]
@@ -594,12 +568,11 @@ def resolve_chat(convo_id):
             
     try:
         convo.status = 'closed'
-        # El contador de pendientes ya se redujo cuando se leyó el chat.
-        # Si queremos ser más robustos, podríamos recalcular
-        # los pendientes aquí, pero por ahora lo dejamos.
-        # role = convo.bot_role
-        # if role and role.chats_pending > 0:
-        #      role.chats_pending = role.chats_pending - 1
+        # Si el chat se cierra sin leer, también restamos el pendiente
+        if convo.unread_count > 0:
+            role = convo.bot_role
+            if role and role.chats_pending > 0:
+                role.chats_pending = role.chats_pending - 1
         
         db.session.commit()
         return jsonify({"success": True, "message": "Chat archivado."})
@@ -673,6 +646,89 @@ def get_soporte_dashboard_data():
     except Exception as e:
         logging.error(f"Error en /api/dashboard/soporte: {e}")
         return jsonify({"error": str(e)}), 500
+
+
+# --- INICIO DE LA CORRECCIÓN ---
+# --- NUEVA API PARA EL DASHBOARD DE ADMIN ---
+@app.route('/api/dashboard/admin')
+@login_required
+def get_admin_dashboard_data():
+    """
+    Proporciona datos reales y GLOBALES para Dashboard.html
+    """
+    admin_check = check_admin()
+    if admin_check: return admin_check
+    
+    try:
+        # 1. Tarjetas de estadísticas
+        today = datetime.utcnow().date()
+        start_of_today = datetime(today.year, today.month, today.day)
+        
+        stats_asistentes_activos = User.query.filter_by(role='Soporte').count()
+        stats_chats_hoy = Conversation.query.filter(Conversation.created_at >= start_of_today).count()
+        stats_chats_resueltos = Conversation.query.filter_by(status='closed').count()
+
+        # 2. Gráfico de líneas (últimos 7 días) - Conversaciones GLOBALES
+        labels = []
+        data = []
+        for i in range(6, -1, -1):
+            day = start_of_today - timedelta(days=i)
+            next_day = day + timedelta(days=1)
+            count = Conversation.query.filter(
+                Conversation.created_at >= day, 
+                Conversation.created_at < next_day
+            ).count()
+            labels.append(day.strftime("%a")) # 'Lun', 'Mar', ...
+            data.append(count)
+        
+        line_chart = {"labels": labels, "data": data}
+
+        # 3. Gráfico de barras (Motivos/Roles) - GLOBAL
+        role_data = db.session.query(
+            BotRole.title, func.count(Conversation.id)
+        ).join(Conversation, BotRole.id == Conversation.bot_role_id)\
+         .group_by(BotRole.title).all()
+        
+        bar_chart = {
+            "labels": [r[0] for r in role_data],
+            "data": [r[1] for r in role_data]
+        }
+        
+        # 4. Tabla de últimos chats
+        table_data = []
+        latest_convos = Conversation.query.order_by(Conversation.created_at.desc()).limit(5).all()
+        
+        for convo in latest_convos:
+            assignee_name = "N/A"
+            role_title = "N/A"
+            if convo.bot_role:
+                role_title = convo.bot_role.title
+                if convo.bot_role.assignee:
+                    assignee_name = convo.bot_role.assignee.name
+
+            table_data.append({
+                "id": f"#{convo.id:04d}",
+                "assignee": assignee_name,
+                "role": role_title,
+                "status": convo.status.capitalize()
+            })
+
+        return jsonify({
+            "stats": {
+                "asistentes_activos": stats_asistentes_activos,
+                "chats_hoy": stats_chats_hoy,
+                "chats_resueltos": stats_chats_resueltos
+            },
+            "lineChart": line_chart,
+            "barChart": bar_chart,
+            "table_data": table_data
+        })
+
+    except Exception as e:
+        logging.error(f"Error en /api/dashboard/admin: {e}")
+        return jsonify({"error": str(e)}), 500
+# --- FIN DE LA CORRECCIÓN ---
+
 
 # --- INICIALIZACIÓN DE LA APLICACIÓN ---
 def init_db(app_instance):
