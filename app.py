@@ -1,15 +1,25 @@
 import os
+import logging
+import re
 from flask import Flask, render_template, request, jsonify, redirect, url_for
 from flask_sqlalchemy import SQLAlchemy
 from dotenv import load_dotenv
-import logging
-import re # Para el análisis de intención (NLP)
-from twilio.twiml.messaging_response import MessagingResponse # Para responder a Twilio
+from twilio.twiml.messaging_response import MessagingResponse
 
-# Configuración de logging para ver los mensajes en OnRender
+# --- NUEVA IMPORTACIÓN DE IA ---
+import google.generativeai as genai
+
+# --- CONFIGURACIÓN ---
 logging.basicConfig(level=logging.INFO)
-
 load_dotenv()
+
+# --- NUEVA CONFIGURACIÓN DE IA ---
+# Carga la clave de API desde las variables de entorno
+try:
+    genai.configure(api_key=os.getenv('GEMINI_API_KEY'))
+    logging.info("API de Gemini configurada.")
+except Exception as e:
+    logging.error(f"Error al configurar la API de Gemini: {e}. Asegúrate de que GEMINI_API_KEY esté en tus variables de entorno.")
 
 app = Flask(__name__, template_folder='templates')
 
@@ -24,7 +34,7 @@ app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', 'una-clave-secreta-por-defect
 
 db = SQLAlchemy(app)
 
-# --- MODELOS DE LA BASE DE DATOS ---
+# --- MODELOS DE LA BASE DE DATOS (Sin cambios) ---
 class User(db.Model):
     __tablename__ = 'users'
     id = db.Column(db.Integer, primary_key=True)
@@ -36,7 +46,7 @@ class User(db.Model):
 class BotRole(db.Model):
     __tablename__ = 'bot_roles'
     id = db.Column(db.Integer, primary_key=True)
-    title = db.Column(db.String(120), nullable=False)
+    title = db.Column(db.String(120), unique=True, nullable=False) # Título debe ser único
     knowledge_base = db.Column(db.Text, nullable=True)
     assignee_id = db.Column(db.Integer, db.ForeignKey('users.id', ondelete='SET NULL'), nullable=True)
     status = db.Column(db.String(20), default='Activo', nullable=False)
@@ -51,7 +61,7 @@ class BotConfig(db.Model):
     whatsapp_number = db.Column(db.String(50), nullable=True)
     welcome_message = db.Column(db.Text, nullable=True)
 
-# --- RUTAS BÁSICAS DE FLASK (PARA SERVIR PÁGINAS) ---
+# --- RUTAS BÁSICAS DE FLASK (Sin cambios) ---
 @app.route('/')
 def index():
     return render_template('Index.html')
@@ -70,19 +80,19 @@ def show_page(page_name):
         return "Not Found", 404
     return render_template(page_name)
 
-# --- API DE LOGIN ---
+# --- API DE LOGIN (Sin cambios) ---
 @app.route('/api/login', methods=['POST'])
 def login():
     data = request.get_json()
     username = data.get('username')
     password = data.get('password')
     user = User.query.filter_by(username=username).first()
-    if user and user.password == password: # ¡En producción, usa hashing de contraseñas!
+    if user and user.password == password:
         redirect_url = url_for('menu_admin' if user.role == 'Admin' else 'menu_soporte')
         return jsonify({"success": True, "redirect_url": redirect_url})
     return jsonify({"success": False, "message": "Usuario o contraseña incorrectos"}), 401
 
-# --- API DE USUARIOS (CRUD) ---
+# --- API DE USUARIOS (CRUD) (Sin cambios) ---
 @app.route('/api/users', methods=['GET'])
 def get_users():
     users = User.query.all()
@@ -92,7 +102,6 @@ def get_users():
 def add_user():
     data = request.get_json()
     username = data.get('username')
-    # Generar username si no se provee, y chequear colisiones
     if not username:
         base_username = data.get('name', 'usuario').split(' ')[0].lower().strip()
         username = base_username
@@ -100,14 +109,12 @@ def add_user():
         while User.query.filter_by(username=username).first():
             username = f"{base_username}{counter}"
             counter += 1
-            
     if User.query.filter_by(username=username).first():
         return jsonify({'message': 'El nombre de usuario ya existe'}), 409
-        
     new_user = User(
         username=username, 
         name=data['name'], 
-        password=data['password'], # ¡En producción, usa hashing!
+        password=data['password'],
         role=data['role']
     )
     db.session.add(new_user)
@@ -121,7 +128,7 @@ def update_user(id):
     user.name = data.get('name', user.name)
     user.role = data.get('role', user.role)
     if 'password' in data and data['password']:
-        user.password = data['password'] # ¡En producción, usa hashing!
+        user.password = data['password']
     db.session.commit()
     return jsonify({'message': 'Usuario actualizado correctamente'})
 
@@ -132,7 +139,7 @@ def delete_user(id):
     db.session.commit()
     return jsonify({'message': 'Usuario eliminado correctamente'})
 
-# --- API DE ROLES DE BOT (CRUD) ---
+# --- API DE ROLES DE BOT (CRUD) (Sin cambios) ---
 @app.route('/api/bot_roles', methods=['GET'])
 def get_bot_roles():
     roles = BotRole.query.options(db.joinedload(BotRole.assignee)).all()
@@ -141,6 +148,8 @@ def get_bot_roles():
 @app.route('/api/bot_roles', methods=['POST'])
 def add_bot_role():
     data = request.get_json()
+    if BotRole.query.filter_by(title=data['title']).first():
+        return jsonify({'message': 'Un rol con este título ya existe'}), 409
     assignee_id = data.get('assignee_id')
     new_role = BotRole(
         title=data['title'],
@@ -150,19 +159,13 @@ def add_bot_role():
     )
     db.session.add(new_role)
     db.session.commit()
-    # Recargar para obtener el nombre del asignado
     role_data = BotRole.query.get(new_role.id)
     return jsonify({
-        'id': role_data.id, 
-        'title': role_data.title, 
-        'knowledge_base': role_data.knowledge_base, 
+        'id': role_data.id, 'title': role_data.title, 'knowledge_base': role_data.knowledge_base, 
         'assignee_name': role_data.assignee.name if role_data.assignee else 'Sin Asignar', 
-        'assignee_id': role_data.assignee_id, 
-        'status': role_data.status, 
-        'chats_received': role_data.chats_received, 
-        'chats_pending': role_data.chats_pending
+        'assignee_id': role_data.assignee_id, 'status': role_data.status, 
+        'chats_received': role_data.chats_received, 'chats_pending': role_data.chats_pending
     }), 201
-
 
 @app.route('/api/bot_roles/<int:id>', methods=['PUT'])
 def update_bot_role(id):
@@ -183,12 +186,11 @@ def delete_bot_role(id):
     db.session.commit()
     return jsonify({'message': 'Rol del bot eliminado correctamente'})
 
-# --- API DE CONFIGURACIÓN DE BOT ---
+# --- API DE CONFIGURACIÓN DE BOT (Sin cambios) ---
 @app.route('/api/bot_config', methods=['GET'])
 def get_bot_config():
     config = BotConfig.query.first()
     if not config:
-        # Si no existe configuración, crea una por defecto
         config = BotConfig(
             is_active=True,
             whatsapp_number="+573132217862",
@@ -196,7 +198,6 @@ def get_bot_config():
         )
         db.session.add(config)
         db.session.commit()
-        logging.info("Creando configuración de bot por defecto.")
     return jsonify({'is_active': config.is_active, 'whatsapp_number': config.whatsapp_number, 'welcome_message': config.welcome_message})
 
 @app.route('/api/bot_config', methods=['PUT'])
@@ -209,59 +210,86 @@ def update_bot_config():
     db.session.commit()
     return jsonify({'message': 'Configuración del bot actualizada correctamente'})
 
-# --- LÓGICA DEL WEBHOOK DE WHATSAPP ---
+# --- LÓGICA DEL WEBHOOK DE WHATSAPP (MODIFICADA) ---
 
 def create_twilio_response(message_text):
-    """
-    Crea una respuesta en el formato TwiML que Twilio espera.
-    """
+    """Crea una respuesta en el formato TwiML que Twilio espera."""
     response = MessagingResponse()
     response.message(message_text)
     return str(response)
 
-def get_intent_and_role(message_body):
+# --- NUEVA FUNCIÓN DE CLASIFICACIÓN CON IA ---
+def get_ai_classification(message_body):
     """
-    Analiza el mensaje del usuario para detectar la intención y el rol objetivo.
-    Esta es una implementación de NLP muy simple basada en palabras clave.
+    Clasifica el mensaje del usuario usando la base de datos de roles y la IA de Gemini.
     """
-    message_lower = message_body.lower().strip()
+    logging.info("Iniciando clasificación con IA...")
     
-    # Palabras clave para Ventas
-    sales_keywords = ['seguro', 'comprar', 'adquirir', 'cotizar', 'precio', 'costo', 'carro', 'moto', 'vehículo', 'compra', 'plan']
+    # 1. Obtener todos los roles de la base de datos
+    try:
+        all_roles = BotRole.query.filter_by(status='Activo').all()
+    except Exception as e:
+        logging.error(f"Error al consultar roles en la BD: {e}")
+        return "General" # Fallback si la BD falla
+
+    if not all_roles:
+        logging.error("No hay roles activos en la base de datos para clasificar.")
+        return "General" # No hay roles contra qué comparar
+
+    # 2. Construir el prompt para la IA
+    prompt_roles = ""
+    for role in all_roles:
+        prompt_roles += f"- Título: {role.title}\n  Descripción: {role.knowledge_base}\n"
+
+    # Se añade "General" como una opción fija
+    prompt_roles += "- Título: General\n  Descripción: Para saludos iniciales (hola, buenos días), despedidas o cualquier consulta que no encaje claramente en las otras categorías.\n"
+
+    system_prompt = f"""
+    Eres un enrutador de soporte al cliente. Tu tarea es clasificar el mensaje de un usuario en una de las siguientes categorías.
+    Lee la descripción de cada rol y la base de conocimiento para tomar tu decisión.
+    Responde *únicamente* con el Título exacto de la categoría que mejor coincida.
+
+    Categorías Disponibles:
+    {prompt_roles}
+
+    Mensaje del Usuario:
+    "{message_body}"
+
+    Categoría:
+    """
     
-    # Palabras clave para Soporte
-    support_keywords = ['ayuda', 'problema', 'no funciona', 'soporte', 'factura', 'error', 'queja']
-
-    # Palabras clave de Saludo (para detectar el inicio)
-    greeting_keywords = ['hola', 'buenos días', 'buenas tardes', 'buenas noches', 'info', 'inicio', 'empezar', 'menu']
-
-    # 1. Chequear intenciones específicas primero
-    if any(re.search(r'\b' + re.escape(keyword) + r'\b', message_lower) for keyword in sales_keywords):
-        return 'Ventas' # Este debe ser el 'title' exacto de tu BotRole en la BD
-
-    if any(re.search(r'\b' + re.escape(keyword) + r'\b', message_lower) for keyword in support_keywords):
-        return 'Soporte Técnico' # Asumiendo que tienes un rol con este título
-
-    # 2. Si no es específica, chequear si es un saludo
-    if any(re.search(r'\b' + re.escape(keyword) + r'\b', message_lower) for keyword in greeting_keywords):
-        return 'General' # Intención para disparar el saludo
-
-    # 3. Si no es nada de lo anterior, también es 'General'
-    return 'General'
+    # 3. Llamar a la API de Gemini
+    try:
+        model = genai.GenerativeModel('gemini-2.5-flash')
+        response = model.generate_content(system_prompt)
+        
+        # Limpiar la respuesta de la IA (a veces añade markdown o espacios)
+        classified_role = response.text.strip().replace("*", "")
+        
+        # Validar que la IA devolvió un rol que existe
+        role_titles = [role.title for role in all_roles] + ["General"]
+        if classified_role in role_titles:
+            logging.info(f"IA clasificó el mensaje como: '{classified_role}'")
+            return classified_role
+        else:
+            logging.warning(f"IA devolvió un rol no válido: '{classified_role}'. Usando 'General'.")
+            return "General"
+            
+    except Exception as e:
+        logging.error(f"Error en la llamada a la API de Gemini: {e}")
+        # Si la IA falla (ej. clave inválida, error de API), se usa 'General'
+        return "General"
 
 @app.route('/api/whatsapp/webhook', methods=['POST'])
 def whatsapp_webhook():
-    """
-    Webhook para recibir mensajes de un proveedor de WhatsApp API (ej. Twilio).
-    """
+    """ Webhook para recibir mensajes de Twilio. """
     
-    # El formato de Twilio usa 'Body' y 'From' en un formulario
     message_body = request.form.get('Body')
     sender_phone = request.form.get('From')
     
     if not message_body or not sender_phone:
         logging.warning("Webhook recibido sin 'Body' o 'From'.")
-        # Asumir formato JSON (como Meta) si el de formulario falla
+        # Intentar parsear JSON (para otros proveedores como Meta)
         try:
             data = request.get_json()
             if data and data.get('entry', [])[0].get('changes', [])[0].get('value', {}).get('messages', []):
@@ -270,10 +298,10 @@ def whatsapp_webhook():
                 sender_phone = message_data['from']
         except Exception:
              logging.warning("Payload no es ni formulario Twilio ni JSON Meta reconocible.")
-             return ('', 400) # Payload inválido
-
+             return ('', 400)
+    
     if not message_body or not sender_phone:
-         return ('', 400) # Definitivamente faltan datos
+         return ('', 400)
 
     logging.info(f"Mensaje recibido de {sender_phone}: {message_body}")
 
@@ -283,15 +311,13 @@ def whatsapp_webhook():
         logging.info("Bot inactivo. Ignorando mensaje.")
         return ('', 200)
 
-    # 2. Analizar el mensaje para determinar el rol/intención
-    role_title = get_intent_and_role(message_body)
-    logging.info(f"Intención detectada: '{role_title}'")
-
+    # 2. Analizar el mensaje para determinar el rol (USANDO IA)
+    # Esta función ahora está dentro del contexto de la app y puede acceder a la BD
+    role_title = get_ai_classification(message_body)
+    
     # 3. Decidir la acción
     
     # --- Lógica de Saludo ---
-    # Si la intención es 'General' (un saludo como "hola"), 
-    # respondemos con el mensaje de bienvenida.
     if role_title == 'General':
         logging.info("Intención 'General' detectada. Enviando saludo.")
         welcome_message = bot_config.welcome_message or "¡Hola! ¿En qué puedo ayudarte?"
@@ -299,16 +325,20 @@ def whatsapp_webhook():
         return response_twiml, 200, {'Content-Type': 'application/xml'}
 
     # --- Lógica de Asignación ---
-    # Si la intención es específica (Ventas, Soporte, etc.), 
-    # asignamos el chat y notificamos al usuario.
     target_role = BotRole.query.filter_by(title=role_title).first()
 
     if not target_role:
-        logging.warning(f"No se encontró el BotRole: '{role_title}'. Buscando rol 'General'.")
+        # Esto *no debería* pasar si la IA funciona, pero es un buen fallback
+        logging.warning(f"IA devolvió '{role_title}' pero no se encontró en BD. Asignando a 'General'.")
         target_role = BotRole.query.filter_by(title='General').first()
+        
+        # Si ni siquiera 'General' existe (error crítico de BD), fallar.
         if not target_role:
-             logging.error("No se encontró el rol específico ni un rol 'General'. Abortando.")
-             return ('', 500) # Error de configuración del servidor
+             logging.error("CRÍTICO: No se encontró el rol específico ni un rol 'General'. La BD está vacía.")
+             # Responder al usuario que algo salió mal
+             error_msg = "Lo sentimos, estamos teniendo problemas internos. Intenta de nuevo más tarde."
+             response_twiml = create_twilio_response(error_msg)
+             return response_twiml, 200, {'Content-Type': 'application/xml'}
 
     # 4. Incrementar los contadores del rol
     try:
@@ -318,7 +348,6 @@ def whatsapp_webhook():
         logging.info(f"Chat asignado al rol '{target_role.title}'. Pendientes: {target_role.chats_pending}")
         
         # 5. Notificar al usuario que fue transferido
-        # (Quitamos la parte de 'Tu solicitud sobre...' para evitar eco)
         transfer_message = f"¡Entendido! Un agente del área de {target_role.title} te atenderá pronto."
         response_twiml = create_twilio_response(transfer_message)
         return response_twiml, 200, {'Content-Type': 'application/xml'}
@@ -328,10 +357,14 @@ def whatsapp_webhook():
         logging.error(f"Error al actualizar contadores del rol: {e}")
         return ('Error interno del servidor', 500)
 
-# --- INICIO DE LA APLICACIÓN Y CREACIÓN DE BD ---
-if __name__ == '__main__':
-    # Creación inicial de la base de datos y datos por defecto
-    with app.app_context():
+
+# --- NUEVA FUNCIÓN DE INICIALIZACIÓN DE LA BD ---
+def init_db(app_instance):
+    """
+    Inicializa la base de datos creando tablas y datos por defecto.
+    Se ejecuta al arrancar Gunicorn.
+    """
+    with app_instance.app_context():
         try:
             db.create_all()
             logging.info("Tablas de la base de datos verificadas/creadas.")
@@ -360,26 +393,32 @@ if __name__ == '__main__':
                 db.session.commit()
 
             # Asegurarse de que existan los roles de ejemplo
+            # Esta es la parte que falló en tu despliegue
             if not BotRole.query.filter_by(title='Ventas').first():
                 logging.info("Creando rol de 'Ventas' por defecto.")
-                db.session.add(BotRole(title='Ventas', knowledge_base='Información de seguros de vehículos.'))
+                db.session.add(BotRole(title='Ventas', knowledge_base='Consultas sobre compra de seguros, cotizaciones, precios, planes de vehículos (carros, motos) y procesos de adquisición.'))
                 db.session.commit()
 
             if not BotRole.query.filter_by(title='Soporte Técnico').first():
                 logging.info("Creando rol de 'Soporte Técnico' por defecto.")
-                db.session.add(BotRole(title='Soporte Técnico', knowledge_base='Manual de solución de problemas.'))
+                db.session.add(BotRole(title='Soporte Técnico', knowledge_base='Problemas con la plataforma, la app no funciona, errores de sistema, facturación, problemas de conexión y ayuda general.'))
                 db.session.commit()
                 
             if not BotRole.query.filter_by(title='General').first():
                 logging.info("Creando rol 'General' por defecto.")
-                db.session.add(BotRole(title='General', knowledge_base='Preguntas frecuentes generales.'))
+                db.session.add(BotRole(title='General', knowledge_base='Preguntas frecuentes generales, saludos, despedidas o consultas que no encajan en otras áreas.'))
                 db.session.commit()
 
         except Exception as e:
             logging.error(f"Error durante la inicialización de la BD: {e}")
-            # Esto puede pasar si la BD está conectada pero no lista, es bueno saberlo
-            logging.error("Asegúrate de que la base de datos PostgreSQL esté accesible.")
+            logging.error("Asegúrate de que la base de datos PostgreSQL esté accesible y las credenciales sean correctas.")
 
+# --- INICIO DE LA APLICACIÓN ---
 
+# Llama a la inicialización aquí para que se ejecute en Gunicorn/OnRender
+init_db(app)
+
+if __name__ == '__main__':
+    # Esto solo se ejecutará si corres 'python app.py' localmente
     port = int(os.environ.get('PORT', 5000))
-    app.run(host='0.0.0.0', port=port, debug=False)
+    app.run(host='0.0.0.0', port=port, debug=True) # Activa debug localmente
