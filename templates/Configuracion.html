@@ -6,7 +6,7 @@
     <link rel="preconnect" href="[https://fonts.googleapis.com](https://fonts.googleapis.com)">
     <link rel="preconnect" href="[https://fonts.gstatic.com](https://fonts.gstatic.com)" crossorigin>
     <link href="[https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap](https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap)" rel="stylesheet">
-    <link rel="stylesheet" href="[https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css](https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css)" integrity="sha512-SnH5WK+bZxgPHs44uWIX+LLJAJ9/2PkPKZ5QiAj6Ta86w+fsb2TkcmfRyVX3pBnMFcV7oQPJkl9QevSCWr3W6A==" crossorigin="anonymous" referrerpolicy="no-referrer" />
+    <link rel="stylesheet" href="[https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css](https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css)" xintegrity="sha512-SnH5WK+bZxgPHs44uWIX+LLJAJ9/2PkPKZ5QiAj6Ta86w+fsb2TkcmfRyVX3pBnMFcV7oQPJkl9QevSCWr3W6A==" crossorigin="anonymous" referrerpolicy="no-referrer" />
     <style>
         :root {
             --card-bg: rgba(255, 255, 255, 0.9);
@@ -239,6 +239,7 @@
                 <p>Gestiona la configuración y el comportamiento de tu asistente virtual.</p>
             </div>
             
+            <!-- Card de Configuración Principal -->
             <div class="config-card">
                 <div class="card-header">
                     <h3>Configuración Principal</h3>
@@ -264,6 +265,7 @@
                 </div>
             </div>
             
+            <!-- --- INICIO DE MODIFICACIÓN: Card de Importar (Campo de Nombre ELIMINADO) --- -->
             <div class="config-card" id="import-card">
                 <div class="card-header" style="border-bottom: none; margin-bottom: 0;">
                     <h3>Importar Historial de Chat</h3>
@@ -277,19 +279,17 @@
                     <div class="form-group">
                         <label for="chatFile">Archivo de Chat (.txt)</label>
                         <input type="file" id="chatFile" name="file" accept=".txt" required>
-                        <p>Selecciona el archivo para autocompletar tu nombre abajo.</p>
+                        <p>Tu nombre de agente se tomará automáticamente de tu perfil de usuario.</p>
                     </div>
-                    <div class="form-group">
-                        <label for="agentName">Tu Nombre (Como aparece en el chat)</label>
-                        <input type="text" id="agentName" name="agentName" placeholder="Ej: 🐴 Santiago Bot" required>
-                        <p>Usado para diferenciar tus mensajes de los del cliente.</p>
-                    </div>
+                    <!-- El campo de Nombre de Agente ha sido eliminado -->
                     <button type="submit" class="btn btn-primary" id="uploadSubmitBtn">
                         <i class="fas fa-upload"></i> Cargar Historial
                     </button>
                 </form>
             </div>
+            <!-- --- FIN DE MODIFICACIÓN --- -->
 
+            <!-- Card para Lista de Importados -->
             <div class="config-card" id="imported-list-card">
                 <div class="card-header" style="padding-bottom: 0; border-bottom: none;">
                     <h3>Contactos Importados</h3>
@@ -303,12 +303,15 @@
                         </tr>
                     </thead>
                     <tbody id="imported-chats-table-body">
-                        </tbody>
+                        <!-- Las filas se cargarán aquí dinámicamente -->
+                    </tbody>
                 </table>
             </div>
-            </main>
+
+        </main>
     </div>
 
+    <!-- Modal de Edición de Configuración -->
     <div class="modal-overlay" id="modalOverlay">
         <div class="modal-content"><form id="modalForm">
             <div class="modal-header">
@@ -344,6 +347,7 @@
         </form></div>
     </div>
 
+    <!-- Toast de Notificación -->
     <div class="toast" id="toastNotification"></div>
 
     <script>
@@ -445,50 +449,19 @@
                 }
             });
 
-            // --- INICIO DE NUEVA LÓGICA ---
+            // --- INICIO DE LÓGICA DE IMPORTACIÓN ---
 
             // --- Formulario de Subida ---
             const uploadForm = document.getElementById('uploadChatForm');
             const uploadBtn = document.getElementById('uploadSubmitBtn');
             const chatPhoneInput = document.getElementById('chatPhone');
-            const agentNameInput = document.getElementById('agentName');
             const chatFileInput = document.getElementById('chatFile');
+            // El input de agentName ya no es necesario aquí
 
             // --- Tabla de Importados ---
             const importedChatsTableBody = document.getElementById('imported-chats-table-body');
 
-            // --- 1. Autocompletar Nombre de Agente ---
-            chatFileInput.addEventListener('change', () => {
-                const file = chatFileInput.files[0];
-                if (!file) {
-                    return;
-                }
-                
-                const reader = new FileReader();
-                reader.onload = (e) => {
-                    const content = e.target.result;
-                    const lines = content.split('\n').slice(0, 50); // Leer primeras 50 líneas
-                    
-                    // Regex para encontrar el primer autor
-                    // 27/08/25, 8:11 p. m. - Autor: Mensaje
-                    const authorRegex = /^\d{1,2}\/\d{1,2}\/\d{2}, \d{1,2}:\d{2} (?:a\. m\.|p\. m\.) - (.*?):/;
-                    
-                    for (const line of lines) {
-                        const match = line.match(authorRegex);
-                        if (match && match[1]) {
-                            const author = match[1].trim();
-                            // No autocompletar si es un mensaje de sistema
-                            if (author.toLowerCase() !== 'multimedia omitido' && !author.includes('cambió') && !author.includes('añadió')) {
-                                agentNameInput.value = author;
-                                break; // Encontramos el primer autor válido
-                            }
-                        }
-                    }
-                };
-                reader.readAsText(file);
-            });
-
-            // --- 2. Cargar Tabla de Importados ---
+            // --- 1. Cargar Tabla de Importados ---
             const loadImportedChats = async () => {
                 try {
                     const response = await fetch('/api/imported_chats');
@@ -498,6 +471,7 @@
                     importedChatsTableBody.innerHTML = ''; // Limpiar tabla
                     if (chats.length === 0) {
                          importedChatsTableBody.innerHTML = '<tr><td colspan="3" style="text-align: center; color: var(--text-secondary); padding: 20px;">No hay chats importados.</td></tr>';
+                         return;
                     }
 
                     chats.forEach(chat => {
@@ -507,7 +481,7 @@
                             <td>${chat.phone}</td>
                             <td>${chat.message_count}</td>
                             <td style="text-align: center;">
-                                <button class="btn-delete-convo" title="Eliminar"><i class="fas fa-trash-alt"></i></button>
+                                <button class="btn-delete-convo" data-id="${chat.id}" title="Eliminar"><i class="fas fa-trash-alt"></i></button>
                             </td>
                         `;
                         importedChatsTableBody.appendChild(row);
@@ -518,12 +492,18 @@
                 }
             };
 
-            // --- 3. Manejador de Subida de Formulario ---
+            // --- 2. Manejador de Subida de Formulario ---
             uploadForm.addEventListener('submit', async (e) => {
                 e.preventDefault();
                 
-                if (!chatPhoneInput.value || !agentNameInput.value || !chatFileInput.files[0]) {
-                    showToast('Por favor, completa todos los campos.', true);
+                if (!chatPhoneInput.value || !chatFileInput.files[0]) {
+                    showToast('Por favor, completa el teléfono y el archivo.', true);
+                    return;
+                }
+                
+                // Validar que el teléfono comience con "whatsapp:+"
+                if (!chatPhoneInput.value.startsWith('whatsapp:+')) {
+                    showToast('El formato del teléfono debe ser "whatsapp:+57..."', true);
                     return;
                 }
 
@@ -532,8 +512,8 @@
 
                 const formData = new FormData();
                 formData.append('phone', chatPhoneInput.value);
-                formData.append('agentName', agentNameInput.value);
                 formData.append('file', chatFileInput.files[0]);
+                // Ya no enviamos 'agentName'
 
                 try {
                     const response = await fetch('/api/admin/upload_chats', {
@@ -560,13 +540,13 @@
                 }
             });
 
-            // --- 4. Manejador de Eliminación de Contacto ---
+            // --- 3. Manejador de Eliminación de Contacto ---
             importedChatsTableBody.addEventListener('click', async (e) => {
                 const deleteButton = e.target.closest('.btn-delete-convo');
                 if (!deleteButton) return;
 
+                const convoId = deleteButton.dataset.id;
                 const row = deleteButton.closest('tr');
-                const convoId = row.dataset.id;
                 const phone = row.cells[0].textContent;
 
                 if (confirm(`¿Estás seguro de que quieres eliminar la conversación con ${phone}? Se borrarán ${row.cells[1].textContent} mensajes. Esta acción no se puede deshacer.`)) {
@@ -593,7 +573,7 @@
             loadConfigData();
             loadImportedChats();
             
-            // --- FIN DE NUEVA LÓGICA ---
+            // --- FIN DE LÓGICA DE IMPORTACIÓN ---
         });
     </script>
 </body>

@@ -329,7 +329,6 @@ def create_twilio_response(message_text):
     response.message(message_text)
     return str(response)
 
-# --- INICIO CORRECCIÓN: Nueva función de IA Conversacional ---
 def get_ia_response_and_route(messages_list):
     """
     Gestiona la conversación con Gemini.
@@ -431,10 +430,7 @@ def get_ia_response_and_route(messages_list):
     except Exception as e:
         logging.error(f"Error en la llamada a la API de Gemini: {e}")
         return ("chat", "Estoy teniendo problemas técnicos. Por favor, espera un momento.")
-# --- FIN CORRECCIÓN: Nueva función de IA ---
 
-
-# --- INICIO CORRECCIÓN: Webhook reescrito para IA conversacional ---
 @app.route('/api/whatsapp/webhook', methods=['POST'])
 def whatsapp_webhook():
     message_body = request.form.get('Body')
@@ -587,7 +583,6 @@ def whatsapp_webhook():
 
 # --- APIS DE CHAT (PROTEGIDAS Y FILTRADAS) ---
 
-# --- INICIO DE MODIFICACIÓN: get_chats() ---
 @app.route('/api/chats', methods=['GET'])
 @login_required
 def get_chats():
@@ -643,7 +638,6 @@ def get_chats():
     except Exception as e:
         logging.error(f"Error en /api/chats: {e}")
         return jsonify({"error": str(e)}), 500
-# --- FIN DE MODIFICACIÓN: get_chats() ---
 
 @app.route('/api/chats/<int:convo_id>/messages', methods=['GET'])
 @login_required
@@ -670,7 +664,6 @@ def get_chat_messages(convo_id):
     messages = [{"sender": msg.sender_type, "text": msg.content} for msg in convo.messages]
     return jsonify(messages)
 
-# --- INICIO DE MODIFICACIÓN: send_chat_message() ---
 @app.route('/api/chats/<int:convo_id>/messages', methods=['POST'])
 @login_required
 def send_chat_message(convo_id):
@@ -716,7 +709,6 @@ def send_chat_message(convo_id):
         logging.error(f"Error al enviar mensaje de Twilio o guardar en BD: {e}")
         db.session.rollback()
         return jsonify({"error": str(e)}), 500
-# --- FIN DE MODIFICACIÓN: send_chat_message() ---
 
 
 @app.route('/api/chats/<int:convo_id>/resolve', methods=['POST'])
@@ -798,7 +790,6 @@ def transfer_chat(convo_id):
         logging.error(f"Error al transferir chat {convo_id}: {e}")
         return jsonify({"error": str(e)}), 500
 
-# --- INICIO DE NUEVA RUTA: /api/imported_chats (GET) ---
 @app.route('/api/imported_chats', methods=['GET'])
 @login_required
 def get_imported_chats():
@@ -820,9 +811,7 @@ def get_imported_chats():
     except Exception as e:
         logging.error(f"Error en /api/imported_chats: {e}")
         return jsonify({"error": str(e)}), 500
-# --- FIN DE NUEVA RUTA ---
 
-# --- INICIO DE NUEVA RUTA: /api/conversations/<id> (DELETE) ---
 @app.route('/api/conversations/<int:convo_id>', methods=['DELETE'])
 @login_required
 def delete_conversation(convo_id):
@@ -845,9 +834,8 @@ def delete_conversation(convo_id):
         db.session.rollback()
         logging.error(f"Error al eliminar conversación {convo_id}: {e}")
         return jsonify({"error": str(e)}), 500
-# --- FIN DE NUEVA RUTA ---
 
-# --- INICIO DE MODIFICACIÓN: /api/admin/upload_chats (Parser robusto) ---
+# --- INICIO DE MODIFICACIÓN: /api/admin/upload_chats (Parser robusto y Agente Automático) ---
 @app.route('/api/admin/upload_chats', methods=['POST'])
 @login_required
 def upload_chats():
@@ -860,14 +848,22 @@ def upload_chats():
         
         file = request.files['file']
         user_phone = request.form.get('phone')
-        agent_name = request.form.get('agentName')
+        
+        # --- INICIO DE NUEVA LÓGICA ---
+        # Obtener el nombre del agente automáticamente del usuario logueado
+        agent_name = current_user.name 
+        # --- FIN DE NUEVA LÓGICA ---
 
         if not file or file.filename == '':
             return jsonify({"error": "No se seleccionó ningún archivo"}), 400
         if not user_phone or not user_phone.startswith('whatsapp:'):
             return jsonify({"error": "El número de teléfono debe estar en formato 'whatsapp:+XXXXXXXXXX'"}), 400
+        
+        # --- MODIFICACIÓN: El chequeo de agent_name ahora usa el del current_user ---
         if not agent_name:
-            return jsonify({"error": "Debe especificar el 'Nombre del Agente' tal como aparece en el chat"}), 400
+            logging.error(f"El usuario {current_user.id} ({current_user.username}) no tiene un nombre configurado.")
+            return jsonify({"error": "Error: Tu cuenta de usuario no tiene un nombre configurado en el perfil. Contacta al administrador."}), 400
+        # --- FIN DE MODIFICACIÓN ---
 
         # Buscar el rol "General" para asignarlo
         general_role = BotRole.query.filter_by(title='General').first()
@@ -936,13 +932,10 @@ def upload_chats():
             line = line.strip()
             if not line:
                 continue
-
-            # --- INICIO DE LA CORRECCIÓN ---
-            # Esta es la lógica correcta. La línea errónea ha sido eliminada.
+            
             # Ignorar líneas de 'source' o formatos extraños del log proporcionado
             if line.startswith('[source:') or line.startswith('m. -'):
                 continue
-            # --- FIN DE LA CORRECCIÓN ---
             
             user_match = msg_start_regex.match(line)
             sys_match = sys_msg_regex.match(line)
@@ -1013,7 +1006,7 @@ def upload_chats():
         if messages_added == 0:
             logging.warning(f"Importación para {user_phone} completada, pero 0 mensajes coincidieron. Verificar Regex y nombre de agente '{agent_name}'.")
             # Devolver error específico si no se añadió nada
-            return jsonify({"error": f"Importación finalizada, pero se añadieron 0 mensajes. Verifique que el 'Nombre del Agente' ('{agent_name}') sea *exactamente* igual al del archivo .txt exportado."}), 400
+            return jsonify({"error": f"Importación finalizada, pero se añadieron 0 mensajes. Tu nombre de usuario ('{agent_name}') no coincide con ningún autor en el archivo .txt."}), 400
 
         return jsonify({"success": True, "message": f"Chat importado para {user_phone}. Se añadieron {messages_added} mensajes."})
 
@@ -1023,7 +1016,6 @@ def upload_chats():
         logging.exception(e)
         return jsonify({"error": str(e)}), 500
 # --- FIN DE MODIFICACIÓN ---
-
 
 
 # --- APIs DE DASHBOARD ---
@@ -1142,3 +1134,4 @@ init_db(app)
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
     app.run(host='0.0.0.0', port=port, debug=False)
+
