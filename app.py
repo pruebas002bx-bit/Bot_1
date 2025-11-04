@@ -1,9 +1,9 @@
 import os
 import logging
-import re  # <--- Importación clave para el parser
+import re
 import json
 from flask import Flask, render_template, request, jsonify, redirect, url_for
-from werkzeug.utils import secure_filename # <-- Importación para upload
+from werkzeug.utils import secure_filename 
 from flask_sqlalchemy import SQLAlchemy
 from dotenv import load_dotenv
 from twilio.twiml.messaging_response import MessagingResponse
@@ -798,7 +798,56 @@ def transfer_chat(convo_id):
         logging.error(f"Error al transferir chat {convo_id}: {e}")
         return jsonify({"error": str(e)}), 500
 
-# --- INICIO DE MODIFICACIÓN: /api/admin/upload_chats ---
+# --- INICIO DE NUEVA RUTA: /api/imported_chats (GET) ---
+@app.route('/api/imported_chats', methods=['GET'])
+@login_required
+def get_imported_chats():
+    admin_check = check_admin()
+    if admin_check: return admin_check
+    
+    try:
+        # Query para obtener conversaciones importadas y contar sus mensajes
+        # Usar outerjoin para incluir chats con 0 mensajes
+        results = db.session.query(Conversation.id, Conversation.user_phone, func.count(Message.id)) \
+            .outerjoin(Message, Message.conversation_id == Conversation.id) \
+            .filter(Conversation.import_source.isnot(None)) \
+            .group_by(Conversation.id, Conversation.user_phone) \
+            .order_by(Conversation.user_phone).all()
+            
+        chat_list = [{'id': r[0], 'phone': r[1].replace('whatsapp:', ''), 'message_count': r[2]} for r in results]
+        return jsonify(chat_list)
+        
+    except Exception as e:
+        logging.error(f"Error en /api/imported_chats: {e}")
+        return jsonify({"error": str(e)}), 500
+# --- FIN DE NUEVA RUTA ---
+
+# --- INICIO DE NUEVA RUTA: /api/conversations/<id> (DELETE) ---
+@app.route('/api/conversations/<int:convo_id>', methods=['DELETE'])
+@login_required
+def delete_conversation(convo_id):
+    admin_check = check_admin()
+    if admin_check: return admin_check
+
+    try:
+        convo = Conversation.query.get_or_404(convo_id)
+        
+        # Opcional: Doble chequeo para seguridad
+        if convo.import_source is None:
+             return jsonify({"error": "No se puede eliminar un chat que no fue importado."}), 403
+        
+        db.session.delete(convo) # Esto eliminará la conversación y todos sus mensajes (por cascade)
+        db.session.commit()
+        
+        return jsonify({"success": True, "message": f"Conversación con {convo.user_phone} eliminada."})
+
+    except Exception as e:
+        db.session.rollback()
+        logging.error(f"Error al eliminar conversación {convo_id}: {e}")
+        return jsonify({"error": str(e)}), 500
+# --- FIN DE NUEVA RUTA ---
+
+# --- INICIO DE MODIFICACIÓN: /api/admin/upload_chats (Parser robusto) ---
 @app.route('/api/admin/upload_chats', methods=['POST'])
 @login_required
 def upload_chats():
@@ -846,95 +895,76 @@ def upload_chats():
         db.session.flush() # Para obtener el convo.id
 
         content = file.read().decode('utf-8')
+        lines = content.splitlines()
         
-        # Regex para dividir el archivo en bloques de mensajes (incluyendo multilínea)
-        # Divide en el salto de línea ANTES de una nueva fecha/hora
-        message_chunks_regex = re.compile(r"\n(?=\d{1,2}/\d{1,2}/\d{2}, \d{1,2}:\d{2} (?:a\. m\.|p\. m\.))")
-        
-        # Regex para parsear un mensaje de usuario/agente
-        # Formato: 27/08/25, 8:11 p. m. - Autor: Mensaje (puede ser multilínea)
-        user_msg_regex = re.compile(
-            r"(\d{1,2}/\d{1,2}/\d{2}), (\d{1,2}:\d{2} (?:a\. m\.|p\. m\.)) - (.*?): (.*)", 
-            re.DOTALL # re.DOTALL hace que '.' coincida también con saltos de línea
+        # Regex for the START of a new message
+        # Formato: 27/08/25, 8:11 p. m. - Autor: Mensaje
+        msg_start_regex = re.compile(
+            r"(\d{1,2}/\d{1,2}/\d{2}), (\d{1,2}:\d{2} (?:a\. m\.|p\. m\.)) - (.*?): (.*)"
         )
         
-        # Regex para parsear un mensaje de sistema (sin autor)
-        # Formato: 27/08/25, 8:11 p. m. - Mensaje del sistema...
+        # Regex for system messages (no author)
+        # Formato: 27/08/25, 8:11 p. m. - Mensaje del sistema
         sys_msg_regex = re.compile(
-            r"(\d{1,2}/\d{1,2}/\d{2}), (\d{1,2}:\d{2} (?:a\. m\.|p\. m\.)) - (.*)", 
-            re.DOTALL
+            r"(\d{1,2}/\d{1,2}/\d{2}), (\d{1,2}:\d{2} (?:a\. m\.|p\. m\.)) - (.*)"
         )
-        
+
         messages_added = 0
         last_message_time = None
+        current_message_data = None # Almacena: {'timestamp': dt, 'sender_type': str, 'content_lines': []}
 
-        message_chunks = message_chunks_regex.split(content)
-        
-        for chunk in message_chunks:
-            chunk = chunk.strip()
-            if not chunk:
-                continue
-            
-            user_match = user_msg_regex.match(chunk)
-            sys_match = None
-            
-            timestamp = None
-            sender_type = None
-            message_content = None
+        def save_buffered_message(buffer):
+            """ Función interna para guardar el mensaje en buffer a la BD. """
+            if not buffer:
+                return
+            try:
+                full_content = "\n".join(buffer['content_lines'])
+                if not full_content.strip(): # No guardar mensajes vacíos
+                    return
 
-            if user_match:
-                date_str, time_str, author, message_content = user_match.groups()
-                author = author.strip()
-                message_content = message_content.strip()
-                
-                sender_type = 'agent' if author == agent_name else 'user'
-                
-                try:
-                    # Limpiar hora para strptime (ej: "8:11 p. m." -> "8:11 PM")
-                    time_str_cleaned = time_str.replace('a. m.', 'AM').replace('p. m.', 'PM')
-                    timestamp_str = f"{date_str} {time_str_cleaned}"
-                    # %y para año de 2 dígitos, %I para 12 horas, %p para AM/PM
-                    timestamp = datetime.strptime(timestamp_str, '%d/%m/%y %I:%M %p') 
-                except ValueError:
-                     # Fallback a formato MM/DD/YY
-                    try:
-                        timestamp = datetime.strptime(timestamp_str, '%m/%d/%y %I:%M %p')
-                    except ValueError:
-                        logging.warning(f"Formato de fecha/hora no reconocido: {timestamp_str}")
-                        continue
-            
-            else:
-                sys_match = sys_msg_regex.match(chunk)
-                if sys_match:
-                    date_str, time_str, message_content = sys_match.groups()
-                    message_content = message_content.strip()
-                    sender_type = 'system'
-
-                    # Ignorar mensajes comunes de sistema de WhatsApp
-                    if "cifrados de extremo a extremo" in message_content or "compartirlos. Obtén más información." in message_content:
-                        continue
-                        
-                    try:
-                        time_str_cleaned = time_str.replace('a. m.', 'AM').replace('p. m.', 'PM')
-                        timestamp_str = f"{date_str} {time_str_cleaned}"
-                        timestamp = datetime.strptime(timestamp_str, '%d/%m/%y %I:%M %p')
-                    except ValueError:
-                        try:
-                            timestamp = datetime.strptime(timestamp_str, '%m/%d/%y %I:%M %p')
-                        except ValueError:
-                            logging.warning(f"Formato de fecha/hora no reconocido (system): {timestamp_str}")
-                            continue
-
-            if timestamp and sender_type and message_content:
                 new_msg = Message(
                     conversation_id=convo.id,
-                    sender_type=sender_type,
-                    content=message_content,
-                    timestamp=timestamp
+                    sender_type=buffer['sender_type'],
+                    content=full_content,
+                    timestamp=buffer['timestamp']
                 )
                 db.session.add(new_msg)
-                messages_added += 1
+            except Exception as e:
+                logging.error(f"Error guardando mensaje en buffer: {e}")
+
+        for line in lines:
+            line = line.strip()
+            if not line:
+                continue
+
+            # Ignorar líneas de 'source' o formatos extraños
+            if line.startswith('# Iniciar buffer con la primera línea
+                }
                 last_message_time = timestamp
+                messages_added += 1 # Contar solo al inicio de un nuevo mensaje
+
+            elif sys_match:
+                # Es un mensaje de sistema
+                # 1. Guardar el mensaje anterior
+                save_buffered_message(current_message_data)
+                current_message_data = None # Detener el buffer, no añadir continuaciones
+                
+                # 2. Procesar el mensaje de sistema (y probablemente ignorarlo)
+                msg_content = sys_match.groups()[2]
+                if "cifrados de extremo a extremo" in msg_content or \
+                   "<Multimedia omitido>" in msg_content or \
+                   "creó este grupo" in msg_content or \
+                   "te añadió" in msg_content:
+                    continue
+                # Aquí se podrían guardar otros mensajes de sistema si se quisiera
+
+            elif current_message_data:
+                # Es una línea de continuación (multilínea)
+                # Simplemente añadir al buffer del mensaje actual
+                current_message_data['content_lines'].append(line)
+
+        # Fin del bucle: guardar el último mensaje que queda en el buffer
+        save_buffered_message(current_message_data)
         
         # Actualizar el timestamp de la conversación al del último mensaje
         if last_message_time:
@@ -942,11 +972,10 @@ def upload_chats():
         
         db.session.commit()
         
-        # Comprobar si se añadió algo
         if messages_added == 0:
-            logging.warning(f"Importación para {user_phone} completada, pero no se añadieron mensajes. Verificar Regex y nombre de agente '{agent_name}'.")
-            # No revertir, la conversación puede haber sido creada/actualizada
-            return jsonify({"error": f"Importación finalizada, pero se añadieron 0 mensajes. Verifique que el 'Nombre del Agente' ('{agent_name}') sea *exactamente* igual al del archivo .txt."}), 400
+            logging.warning(f"Importación para {user_phone} completada, pero 0 mensajes coincidieron. Verificar Regex y nombre de agente '{agent_name}'.")
+            # Devolver error específico si no se añadió nada
+            return jsonify({"error": f"Importación finalizada, pero se añadieron 0 mensajes. Verifique que el 'Nombre del Agente' ('{agent_name}') sea *exactamente* igual al del archivo .txt exportado."}), 400
 
         return jsonify({"success": True, "message": f"Chat importado para {user_phone}. Se añadieron {messages_added} mensajes."})
 

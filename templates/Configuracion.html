@@ -3,10 +3,10 @@
 <head>
     <meta charset="UTF-8">
     <title>Panel de Configuración del Bot</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css" integrity="sha512-SnH5WK+bZxgPHs44uWIX+LLJAJ9/2PkPKZ5QiAj6Ta86w+fsb2TkcmfRyVX3pBnMFcV7oQPJkl9QevSCWr3W6A==" crossorigin="anonymous" referrerpolicy="no-referrer" />
+    <link rel="preconnect" href="[https://fonts.googleapis.com](https://fonts.googleapis.com)">
+    <link rel="preconnect" href="[https://fonts.gstatic.com](https://fonts.gstatic.com)" crossorigin>
+    <link href="[https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap](https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap)" rel="stylesheet">
+    <link rel="stylesheet" href="[https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css](https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css)" integrity="sha512-SnH5WK+bZxgPHs44uWIX+LLJAJ9/2PkPKZ5QiAj6Ta86w+fsb2TkcmfRyVX3pBnMFcV7oQPJkl9QevSCWr3W6A==" crossorigin="anonymous" referrerpolicy="no-referrer" />
     <style>
         :root {
             --card-bg: rgba(255, 255, 255, 0.9);
@@ -27,8 +27,7 @@
 
         body {
             font-family: 'Inter', sans-serif;
-            /* CORRECCIÓN: Fondo de imagen aplicado */
-            background: url('https://i.postimg.cc/pLqCVDFx/Chat-GPT-Image-19-sept-2025-18-11-46.png') no-repeat center center/cover;
+            background: url('[https://i.postimg.cc/pLqCVDFx/Chat-GPT-Image-19-sept-2025-18-11-46.png](https://i.postimg.cc/pLqCVDFx/Chat-GPT-Image-19-sept-2025-18-11-46.png)') no-repeat center center/cover;
             background-attachment: fixed;
             min-height: 100vh;
         }
@@ -52,7 +51,7 @@
             font-weight: 800; 
             color: var(--text-primary); 
             margin-bottom: 8px; 
-            text-shadow: 0 2px 10px rgba(255,255,255,0.7); /* Sombra para resaltar sobre el fondo */
+            text-shadow: 0 2px 10px rgba(255,255,255,0.7); 
         }
         .content-header p { 
             font-size: 1.15em; 
@@ -62,7 +61,6 @@
         }
 
         .config-card {
-            /* CORRECCIÓN: Estilo de cristal esmerilado */
             background: var(--card-bg); 
             backdrop-filter: blur(15px); 
             -webkit-backdrop-filter: blur(15px);
@@ -164,7 +162,7 @@
         .toast { position: fixed; bottom: -100px; left: 50%; transform: translateX(-50%); background-color: var(--accent-color); color: white; padding: 15px 25px; border-radius: 12px; box-shadow: 0 5px 15px rgba(0,0,0,0.2); font-weight: 500; z-index: 2000; transition: bottom 0.5s ease; }
         .toast.show { bottom: 30px; }
 
-        /* --- INICIO DE MODIFICACIÓN: Estilos para el nuevo formulario --- */
+        /* --- INICIO DE MODIFICACIÓN: Estilos para Formulario y Tabla --- */
         .form-group {
             margin-bottom: 20px;
         }
@@ -199,6 +197,37 @@
             color: var(--text-secondary);
             margin-top: 5px;
         }
+
+        .imported-table { 
+            width: 100%; 
+            border-collapse: collapse; 
+            margin-top: 15px; 
+            table-layout: fixed; /* Ayuda a que las columnas se comporten */
+        }
+        .imported-table th, .imported-table td { 
+            padding: 12px 15px; 
+            text-align: left; 
+            border-bottom: 1px solid rgba(0,0,0,0.1); 
+            word-wrap: break-word; /* Para números largos */
+        }
+        .imported-table th { font-weight: 600; color: var(--text-secondary); }
+        .imported-table td { color: var(--text-primary); }
+        .imported-table tr:last-child td { border-bottom: none; }
+        .imported-table th:nth-child(1) { width: 50%; } /* Columna de Contacto */
+        .imported-table th:nth-child(2) { width: 25%; } /* Columna de Mensajes */
+        .imported-table th:nth-child(3) { width: 25%; text-align: center; } /* Columna de Acciones */
+        .imported-table td:nth-child(3) { text-align: center; }
+
+        .btn-delete-convo { 
+            background: none; 
+            border: none; 
+            color: #ef4444; 
+            cursor: pointer; 
+            font-size: 1.1em;
+            padding: 5px;
+            transition: color 0.2s;
+        }
+        .btn-delete-convo:hover { color: #dc2626; }
         /* --- FIN DE MODIFICACIÓN --- */
     </style>
 </head>
@@ -209,6 +238,7 @@
                 <h1>Bot de WhatsApp</h1>
                 <p>Gestiona la configuración y el comportamiento de tu asistente virtual.</p>
             </div>
+            
             <div class="config-card">
                 <div class="card-header">
                     <h3>Configuración Principal</h3>
@@ -241,22 +271,40 @@
                 <form id="uploadChatForm">
                     <div class="form-group">
                         <label for="chatPhone">Número del Cliente (Formato Twilio)</label>
-                        <input type="text" id="chatPhone" name="phone" placeholder="whatsapp:+573001234567" required>
+                        <input type="text" id="chatPhone" name="phone" value="whatsapp:+57" placeholder="whatsapp:+573001234567" required>
                         <p>Debe incluir "whatsapp:" y el código de país.</p>
-                    </div>
-                    <div class="form-group">
-                        <label for="agentName">Tu Nombre (Como aparece en el chat)</label>
-                        <input type="text" id="agentName" name="agentName" placeholder="Ej: Juan Pérez" required>
-                        <p>Usado para diferenciar tus mensajes de los del cliente.</p>
                     </div>
                     <div class="form-group">
                         <label for="chatFile">Archivo de Chat (.txt)</label>
                         <input type="file" id="chatFile" name="file" accept=".txt" required>
+                        <p>Selecciona el archivo para autocompletar tu nombre abajo.</p>
+                    </div>
+                    <div class="form-group">
+                        <label for="agentName">Tu Nombre (Como aparece en el chat)</label>
+                        <input type="text" id="agentName" name="agentName" placeholder="Ej: 🐴 Santiago Bot" required>
+                        <p>Usado para diferenciar tus mensajes de los del cliente.</p>
                     </div>
                     <button type="submit" class="btn btn-primary" id="uploadSubmitBtn">
                         <i class="fas fa-upload"></i> Cargar Historial
                     </button>
                 </form>
+            </div>
+
+            <div class="config-card" id="imported-list-card">
+                <div class="card-header" style="padding-bottom: 0; border-bottom: none;">
+                    <h3>Contactos Importados</h3>
+                </div>
+                <table class="imported-table">
+                    <thead>
+                        <tr>
+                            <th>Contacto (Teléfono)</th>
+                            <th>Mensajes</th>
+                            <th>Acciones</th>
+                        </tr>
+                    </thead>
+                    <tbody id="imported-chats-table-body">
+                        </tbody>
+                </table>
             </div>
             </main>
     </div>
@@ -295,6 +343,7 @@
             </div>
         </form></div>
     </div>
+
     <div class="toast" id="toastNotification"></div>
 
     <script>
@@ -304,8 +353,6 @@
             const modalForm = document.getElementById('modalForm');
             const toastNotification = document.getElementById('toastNotification');
             
-            // --- INICIO: Simulación de carga de datos ---
-            // En una app real, esto vendría de /api/bot_config
             let config = {
                 botStatus: true,
                 whatsappNumber: '+57 3132217862',
@@ -327,7 +374,6 @@
                     renderData(); // Renderizar con valores por defecto
                 }
             };
-            // --- FIN: Simulación de carga de datos ---
 
             const renderData = () => {
                 const statusDisplay = document.getElementById('botStatusDisplay');
@@ -339,19 +385,16 @@
 
             const showToast = (message, isError = false) => {
                 toastNotification.textContent = message;
-                // --- INICIO DE MODIFICACIÓN: Estilo de error para toast ---
                 if (isError) {
                     toastNotification.style.backgroundColor = '#ef4444'; // Rojo de error
                 } else {
                     toastNotification.style.backgroundColor = 'var(--accent-color)'; // Color normal
                 }
-                // --- FIN DE MODIFICACIÓN ---
                 toastNotification.classList.add('show');
                 setTimeout(() => {
                     toastNotification.classList.remove('show');
-                    // Resetear color
                     toastNotification.style.backgroundColor = 'var(--accent-color)';
-                }, 4000); // Más tiempo para errores
+                }, 4000); 
             };
 
             const openModal = () => {
@@ -388,7 +431,6 @@
                     });
                     if (!response.ok) throw new Error('Error al guardar');
                     
-                    // Actualizar config local
                     config.botStatus = newData.is_active;
                     config.whatsappNumber = newData.whatsapp_number;
                     config.welcomeMessage = newData.welcome_message;
@@ -403,13 +445,80 @@
                 }
             });
 
-            // --- INICIO DE MODIFICACIÓN: Lógica de subida de archivos ---
+            // --- INICIO DE NUEVA LÓGICA ---
+
+            // --- Formulario de Subida ---
             const uploadForm = document.getElementById('uploadChatForm');
             const uploadBtn = document.getElementById('uploadSubmitBtn');
             const chatPhoneInput = document.getElementById('chatPhone');
             const agentNameInput = document.getElementById('agentName');
             const chatFileInput = document.getElementById('chatFile');
 
+            // --- Tabla de Importados ---
+            const importedChatsTableBody = document.getElementById('imported-chats-table-body');
+
+            // --- 1. Autocompletar Nombre de Agente ---
+            chatFileInput.addEventListener('change', () => {
+                const file = chatFileInput.files[0];
+                if (!file) {
+                    return;
+                }
+                
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    const content = e.target.result;
+                    const lines = content.split('\n').slice(0, 50); // Leer primeras 50 líneas
+                    
+                    // Regex para encontrar el primer autor
+                    // 27/08/25, 8:11 p. m. - Autor: Mensaje
+                    const authorRegex = /^\d{1,2}\/\d{1,2}\/\d{2}, \d{1,2}:\d{2} (?:a\. m\.|p\. m\.) - (.*?):/;
+                    
+                    for (const line of lines) {
+                        const match = line.match(authorRegex);
+                        if (match && match[1]) {
+                            const author = match[1].trim();
+                            // No autocompletar si es un mensaje de sistema
+                            if (author.toLowerCase() !== 'multimedia omitido' && !author.includes('cambió') && !author.includes('añadió')) {
+                                agentNameInput.value = author;
+                                break; // Encontramos el primer autor válido
+                            }
+                        }
+                    }
+                };
+                reader.readAsText(file);
+            });
+
+            // --- 2. Cargar Tabla de Importados ---
+            const loadImportedChats = async () => {
+                try {
+                    const response = await fetch('/api/imported_chats');
+                    if (!response.ok) throw new Error('Error al cargar chats');
+                    const chats = await response.json();
+                    
+                    importedChatsTableBody.innerHTML = ''; // Limpiar tabla
+                    if (chats.length === 0) {
+                         importedChatsTableBody.innerHTML = '<tr><td colspan="3" style="text-align: center; color: var(--text-secondary); padding: 20px;">No hay chats importados.</td></tr>';
+                    }
+
+                    chats.forEach(chat => {
+                        const row = document.createElement('tr');
+                        row.dataset.id = chat.id;
+                        row.innerHTML = `
+                            <td>${chat.phone}</td>
+                            <td>${chat.message_count}</td>
+                            <td style="text-align: center;">
+                                <button class="btn-delete-convo" title="Eliminar"><i class="fas fa-trash-alt"></i></button>
+                            </td>
+                        `;
+                        importedChatsTableBody.appendChild(row);
+                    });
+                } catch (error) {
+                    console.error(error);
+                    importedChatsTableBody.innerHTML = '<tr><td colspan="3" style="text-align: center; color: red; padding: 20px;">Error al cargar chats.</td></tr>';
+                }
+            };
+
+            // --- 3. Manejador de Subida de Formulario ---
             uploadForm.addEventListener('submit', async (e) => {
                 e.preventDefault();
                 
@@ -430,7 +539,6 @@
                     const response = await fetch('/api/admin/upload_chats', {
                         method: 'POST',
                         body: formData
-                        // No se necesita 'Content-Type', el navegador lo pone por ser FormData
                     });
 
                     const data = await response.json();
@@ -438,6 +546,8 @@
                     if (response.ok && data.success) {
                         showToast(data.message || 'Historial cargado con éxito.');
                         uploadForm.reset();
+                        chatPhoneInput.value = 'whatsapp:+57'; // Resetear valor por defecto
+                        loadImportedChats(); // Recargar la tabla
                     } else {
                         throw new Error(data.error || 'Error desconocido al cargar el archivo.');
                     }
@@ -449,9 +559,41 @@
                     uploadBtn.innerHTML = '<i class="fas fa-upload"></i> Cargar Historial';
                 }
             });
-            // --- FIN DE MODIFICACIÓN ---
 
-            loadConfigData(); // Cargar datos iniciales
+            // --- 4. Manejador de Eliminación de Contacto ---
+            importedChatsTableBody.addEventListener('click', async (e) => {
+                const deleteButton = e.target.closest('.btn-delete-convo');
+                if (!deleteButton) return;
+
+                const row = deleteButton.closest('tr');
+                const convoId = row.dataset.id;
+                const phone = row.cells[0].textContent;
+
+                if (confirm(`¿Estás seguro de que quieres eliminar la conversación con ${phone}? Se borrarán ${row.cells[1].textContent} mensajes. Esta acción no se puede deshacer.`)) {
+                    try {
+                        const response = await fetch(`/api/conversations/${convoId}`, {
+                            method: 'DELETE'
+                        });
+                        const data = await response.json();
+                        
+                        if (response.ok && data.success) {
+                            showToast(data.message);
+                            loadImportedChats(); // Recargar la tabla
+                        } else {
+                            throw new Error(data.error || 'Error al eliminar');
+                        }
+                    } catch (error) {
+                         console.error(error);
+                         showToast(error.message, true);
+                    }
+                }
+            });
+
+            // --- Carga Inicial ---
+            loadConfigData();
+            loadImportedChats();
+            
+            // --- FIN DE NUEVA LÓGICA ---
         });
     </script>
 </body>
