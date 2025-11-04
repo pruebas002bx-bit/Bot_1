@@ -1,9 +1,9 @@
 import os
 import logging
-import re  # <--- CORRECCIÓN: Añadido
-import json  # <--- CORRECCIÓN: Añadido
+import re  # <--- Importación clave para el parser
+import json
 from flask import Flask, render_template, request, jsonify, redirect, url_for
-from werkzeug.utils import secure_filename # <-- AÑADIDO PARA UPLOAD
+from werkzeug.utils import secure_filename # <-- Importación para upload
 from flask_sqlalchemy import SQLAlchemy
 from dotenv import load_dotenv
 from twilio.twiml.messaging_response import MessagingResponse
@@ -96,7 +96,6 @@ class Conversation(db.Model):
     __tablename__ = 'conversations'
     id = db.Column(db.Integer, primary_key=True)
     user_phone = db.Column(db.String(50), nullable=False, index=True)
-    # --- CORRECCIÓN: El estado 'ia_greeting' se maneja aquí ---
     status = db.Column(db.String(20), default='ia_greeting', nullable=False, index=True) # 'ia_greeting', 'open', 'closed'
     created_at = db.Column(db.DateTime(timezone=True), server_default=func.now())
     updated_at = db.Column(db.DateTime(timezone=True), onupdate=func.now())
@@ -105,10 +104,8 @@ class Conversation(db.Model):
     bot_role = db.relationship('BotRole', back_populates='conversations')
     messages = db.relationship('Message', back_populates='conversation', cascade="all, delete-orphan", order_by='Message.timestamp')
     
-    # --- INICIO DE MODIFICACIÓN ---
     # Campo para rastrear chats importados
     import_source = db.Column(db.String(100), nullable=True, default=None)
-    # --- FIN DE MODIFICACIÓN ---
     
     pending_counted = db.Column(db.Boolean, default=False) # Flag para saber si ya incrementó/decrementó pending
 
@@ -655,9 +652,6 @@ def get_chat_messages(convo_id):
     if current_user.role != 'Admin':
         assigned_role_ids = [role.id for role in current_user.assigned_roles]
         if convo.bot_role_id not in assigned_role_ids:
-            # CORRECCIÓN: Permitir ver si el chat *estuvo* en su rol (transferido)
-            # Modificación: Esta lógica se aplica a CUALQUIER estado (open o closed)
-            # if convo.status == 'open': # Restricción eliminada
             return jsonify({"error": "No autorizado para ver este chat"}), 403
             
     # Marcar como leído (solo si está 'open' y tiene no leídos)
@@ -804,7 +798,7 @@ def transfer_chat(convo_id):
         logging.error(f"Error al transferir chat {convo_id}: {e}")
         return jsonify({"error": str(e)}), 500
 
-# --- INICIO DE NUEVA RUTA: /api/admin/upload_chats ---
+# --- INICIO DE MODIFICACIÓN: /api/admin/upload_chats ---
 @app.route('/api/admin/upload_chats', methods=['POST'])
 @login_required
 def upload_chats():
@@ -829,7 +823,6 @@ def upload_chats():
         # Buscar el rol "General" para asignarlo
         general_role = BotRole.query.filter_by(title='General').first()
         if not general_role:
-             # Fallback: asignarlo al primer rol de bot que exista
              general_role = BotRole.query.first()
              if not general_role:
                  return jsonify({"error": "No se encontraron roles de bot para asignar el chat importado"}), 500
@@ -845,50 +838,94 @@ def upload_chats():
             )
             db.session.add(convo)
         else:
-            # Si ya existe, solo actualizamos los metadatos y borramos mensajes antiguos
+            # Si ya existe, actualizamos metadatos y borramos mensajes antiguos
             convo.status = 'closed'
             convo.import_source = 'whatsapp_txt_upload'
-            # Borrar mensajes antiguos para evitar duplicados en la re-importación
             Message.query.filter_by(conversation_id=convo.id).delete()
 
         db.session.flush() # Para obtener el convo.id
 
         content = file.read().decode('utf-8')
-        lines = content.splitlines()
         
-        # Regex para parsear el formato: [DD/MM/YYYY, HH:MM:SS] Nombre: Mensaje
-        # Esto no manejará mensajes multilínea.
-        chat_regex = re.compile(r"\[(\d{1,2}/\d{1,2}/\d{4}), (\d{1,2}:\d{2}:\d{2})\] (.*?): (.*)")
+        # Regex para dividir el archivo en bloques de mensajes (incluyendo multilínea)
+        # Divide en el salto de línea ANTES de una nueva fecha/hora
+        message_chunks_regex = re.compile(r"\n(?=\d{1,2}/\d{1,2}/\d{2}, \d{1,2}:\d{2} (?:a\. m\.|p\. m\.))")
+        
+        # Regex para parsear un mensaje de usuario/agente
+        # Formato: 27/08/25, 8:11 p. m. - Autor: Mensaje (puede ser multilínea)
+        user_msg_regex = re.compile(
+            r"(\d{1,2}/\d{1,2}/\d{2}), (\d{1,2}:\d{2} (?:a\. m\.|p\. m\.)) - (.*?): (.*)", 
+            re.DOTALL # re.DOTALL hace que '.' coincida también con saltos de línea
+        )
+        
+        # Regex para parsear un mensaje de sistema (sin autor)
+        # Formato: 27/08/25, 8:11 p. m. - Mensaje del sistema...
+        sys_msg_regex = re.compile(
+            r"(\d{1,2}/\d{1,2}/\d{2}), (\d{1,2}:\d{2} (?:a\. m\.|p\. m\.)) - (.*)", 
+            re.DOTALL
+        )
         
         messages_added = 0
         last_message_time = None
 
-        for line in lines:
-            match = chat_regex.match(line)
-            if match:
-                date_str, time_str, author, message_content = match.groups()
+        message_chunks = message_chunks_regex.split(content)
+        
+        for chunk in message_chunks:
+            chunk = chunk.strip()
+            if not chunk:
+                continue
+            
+            user_match = user_msg_regex.match(chunk)
+            sys_match = None
+            
+            timestamp = None
+            sender_type = None
+            message_content = None
+
+            if user_match:
+                date_str, time_str, author, message_content = user_match.groups()
+                author = author.strip()
+                message_content = message_content.strip()
+                
+                sender_type = 'agent' if author == agent_name else 'user'
                 
                 try:
-                    # Asumimos formato DD/MM/YYYY
-                    timestamp_str = f"{date_str} {time_str}"
-                    timestamp = datetime.strptime(timestamp_str, '%d/%m/%Y %H:%M:%S')
-                    last_message_time = timestamp
+                    # Limpiar hora para strptime (ej: "8:11 p. m." -> "8:11 PM")
+                    time_str_cleaned = time_str.replace('a. m.', 'AM').replace('p. m.', 'PM')
+                    timestamp_str = f"{date_str} {time_str_cleaned}"
+                    # %y para año de 2 dígitos, %I para 12 horas, %p para AM/PM
+                    timestamp = datetime.strptime(timestamp_str, '%d/%m/%y %I:%M %p') 
                 except ValueError:
-                    # Intentar formato MM/DD/YYYY
+                     # Fallback a formato MM/DD/YY
                     try:
-                        timestamp_str = f"{date_str} {time_str}" # Re-asignar por si acaso
-                        timestamp = datetime.strptime(timestamp_str, '%m/%d/%Y %H:%M:%S')
-                        last_message_time = timestamp
+                        timestamp = datetime.strptime(timestamp_str, '%m/%d/%y %I:%M %p')
                     except ValueError:
-                        logging.warning(f"Formato de fecha no reconocido en línea: {line}")
-                        continue # Saltar esta línea
+                        logging.warning(f"Formato de fecha/hora no reconocido: {timestamp_str}")
+                        continue
+            
+            else:
+                sys_match = sys_msg_regex.match(chunk)
+                if sys_match:
+                    date_str, time_str, message_content = sys_match.groups()
+                    message_content = message_content.strip()
+                    sender_type = 'system'
 
-                sender_type = 'system' # Default
-                if author == agent_name:
-                    sender_type = 'agent'
-                else:
-                    sender_type = 'user' # Asumir que todo lo demás es el cliente
+                    # Ignorar mensajes comunes de sistema de WhatsApp
+                    if "cifrados de extremo a extremo" in message_content or "compartirlos. Obtén más información." in message_content:
+                        continue
+                        
+                    try:
+                        time_str_cleaned = time_str.replace('a. m.', 'AM').replace('p. m.', 'PM')
+                        timestamp_str = f"{date_str} {time_str_cleaned}"
+                        timestamp = datetime.strptime(timestamp_str, '%d/%m/%y %I:%M %p')
+                    except ValueError:
+                        try:
+                            timestamp = datetime.strptime(timestamp_str, '%m/%d/%y %I:%M %p')
+                        except ValueError:
+                            logging.warning(f"Formato de fecha/hora no reconocido (system): {timestamp_str}")
+                            continue
 
+            if timestamp and sender_type and message_content:
                 new_msg = Message(
                     conversation_id=convo.id,
                     sender_type=sender_type,
@@ -897,13 +934,20 @@ def upload_chats():
                 )
                 db.session.add(new_msg)
                 messages_added += 1
-
+                last_message_time = timestamp
+        
         # Actualizar el timestamp de la conversación al del último mensaje
         if last_message_time:
             convo.updated_at = last_message_time
         
         db.session.commit()
         
+        # Comprobar si se añadió algo
+        if messages_added == 0:
+            logging.warning(f"Importación para {user_phone} completada, pero no se añadieron mensajes. Verificar Regex y nombre de agente '{agent_name}'.")
+            # No revertir, la conversación puede haber sido creada/actualizada
+            return jsonify({"error": f"Importación finalizada, pero se añadieron 0 mensajes. Verifique que el 'Nombre del Agente' ('{agent_name}') sea *exactamente* igual al del archivo .txt."}), 400
+
         return jsonify({"success": True, "message": f"Chat importado para {user_phone}. Se añadieron {messages_added} mensajes."})
 
     except Exception as e:
@@ -911,7 +955,7 @@ def upload_chats():
         logging.error(f"Error fatal en /api/admin/upload_chats: {e}")
         logging.exception(e)
         return jsonify({"error": str(e)}), 500
-# --- FIN DE NUEVA RUTA ---
+# --- FIN DE MODIFICACIÓN ---
 
 
 # --- APIs DE DASHBOARD ---
