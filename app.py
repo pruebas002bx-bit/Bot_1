@@ -919,7 +919,7 @@ def upload_chats():
                 return
             try:
                 full_content = "\n".join(buffer['content_lines'])
-                if not full_content.strip(): # No guardar mensajes vacíos
+                if not full_content.strip() or full_content == "<Multimedia omitido>": # No guardar mensajes vacíos o multimedia
                     return
 
                 new_msg = Message(
@@ -937,7 +937,7 @@ def upload_chats():
             if not line:
                 continue
 
-            # Ignorar líneas de 'source' o formatos extraños
+            # Ignorar líneas de 'source' o formatos extraños del log proporcionado
             if line.startswith('# Iniciar buffer con la primera línea
                 }
                 last_message_time = timestamp
@@ -954,7 +954,8 @@ def upload_chats():
                 if "cifrados de extremo a extremo" in msg_content or \
                    "<Multimedia omitido>" in msg_content or \
                    "creó este grupo" in msg_content or \
-                   "te añadió" in msg_content:
+                   "te añadió" in msg_content or \
+                   "Los mensajes y las llamadas están cifrados" in msg_content:
                     continue
                 # Aquí se podrían guardar otros mensajes de sistema si se quisiera
 
