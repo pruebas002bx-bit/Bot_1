@@ -937,8 +937,45 @@ def upload_chats():
             if not line:
                 continue
 
+            # --- INICIO DE LA CORRECCIÓN ---
+            # Esta es la lógica correcta. La línea errónea ha sido eliminada.
             # Ignorar líneas de 'source' o formatos extraños del log proporcionado
-            if line.startswith('# Iniciar buffer con la primera línea
+            if line.startswith('[source:') or line.startswith('m. -'):
+                continue
+            # --- FIN DE LA CORRECCIÓN ---
+            
+            user_match = msg_start_regex.match(line)
+            sys_match = sys_msg_regex.match(line)
+
+            if user_match:
+                # Es una nueva línea de mensaje de usuario/agente
+                # 1. Guardar el mensaje anterior que estaba en el buffer
+                save_buffered_message(current_message_data)
+                
+                # 2. Empezar el nuevo mensaje
+                date_str, time_str, author, msg_line_1 = user_match.groups()
+                author = author.strip()
+                
+                try:
+                    # Limpiar hora para strptime (ej: "8:11 p. m." -> "8:11 PM")
+                    time_str_cleaned = time_str.replace('a. m.', 'AM').replace('p. m.', 'PM')
+                    timestamp_str = f"{date_str} {time_str_cleaned}"
+                    # %y para año de 2 dígitos (25), %I para 12 horas, %p para AM/PM
+                    timestamp = datetime.strptime(timestamp_str, '%d/%m/%y %I:%M %p')
+                except ValueError:
+                    try:
+                        # Fallback a formato MM/DD/YY
+                        timestamp = datetime.strptime(timestamp_str, '%m/%d/%y %I:%M %p')
+                    except ValueError:
+                        logging.warning(f"Formato de fecha/hora no reconocido: {timestamp_str}")
+                        continue
+                
+                sender_type = 'agent' if author == agent_name else 'user'
+                
+                current_message_data = {
+                    'timestamp': timestamp,
+                    'sender_type': sender_type,
+                    'content_lines': [msg_line_1.strip()] # Iniciar buffer con la primera línea
                 }
                 last_message_time = timestamp
                 messages_added += 1 # Contar solo al inicio de un nuevo mensaje
@@ -986,6 +1023,7 @@ def upload_chats():
         logging.exception(e)
         return jsonify({"error": str(e)}), 500
 # --- FIN DE MODIFICACIÓN ---
+
 
 
 # --- APIs DE DASHBOARD ---
