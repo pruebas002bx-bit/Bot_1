@@ -4,13 +4,13 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Chats Generales</title>
-    <link rel="stylesheet" href="[https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css](https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css)">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <style>
         /* --- ESTILOS (sin cambios, omitidos por brevedad) --- */
         :root {
             --left-panel-bg: #f0f2f5;
             --right-panel-header-bg: #e9edef;
-            --chat-bg-image: url('[https://user-images.githubusercontent.com/15075759/28719144-86dc0f70-73b1-11e7-911d-60d70fcded21.png](https://user-images.githubusercontent.com/15075759/28719144-86dc0f70-73b1-11e7-911d-60d70fcded21.png)');
+            --chat-bg-image: url('https://user-images.githubusercontent.com/15075759/28719144-86dc0f70-73b1-11e7-911d-60d70fcded21.png');
             --text-primary: #111827;
             --text-secondary: #6b7280;
             --border-color: #d1d8de;
@@ -40,7 +40,13 @@
         .chat-time { font-size: 0.8em; color: var(--text-secondary); }
         .unread-badge { background-color: var(--danger-color); color: white; font-size: 0.75em; font-weight: 600; border-radius: 50%; width: 22px; height: 22px; display: flex; align-items: center; justify-content: center; margin-top: 5px; }
         .chat-tabs { display: flex; border-bottom: 2px solid #e2e8f0; margin-top: 10px; }
-        .tab-btn { flex: 1; padding: 12px; background: none; border: none; cursor: pointer; font-weight: 600; color: var(--text-secondary); border-bottom: 3px solid transparent; transition: all 0.2s; }
+        /* --- INICIO DE MODIFICACIÓN: Estilo para pestaña inactiva --- */
+        .tab-btn { 
+            flex: 1; padding: 12px; background: none; border: none; 
+            cursor: pointer; font-weight: 600; color: var(--text-secondary); 
+            border-bottom: 3px solid transparent; transition: all 0.2s; 
+        }
+        /* --- FIN DE MODIFICACIÓN --- */
         .tab-btn.active { color: var(--accent-color); border-bottom-color: var(--accent-color); }
         .chat-window-panel { width: 70%; display: flex; flex-direction: column; }
         .chat-window-header { padding: 10px 20px; background: var(--right-panel-header-bg); border-bottom: 1px solid var(--border-color); display: flex; justify-content: space-between; align-items: center; }
@@ -95,9 +101,10 @@
             <header class="chat-list-header">
                 <div class="chat-search"><input type="text" id="chat-search-input" placeholder="Buscar por número..."></div>
                 <div class="chat-tabs">
-                    <button class="tab-btn active" data-view="active">Activos</button>
-                    </div>
-            </header>
+                    <button class="tab-btn active" data-view="open">Activos</button>
+                    <button class="tab-btn" data-view="closed">Archivados</button>
+                </div>
+                </header>
             <div class="chat-items" id="chat-list"></div>
         </aside>
         <main class="chat-window-panel" id="chat-window"></main>
@@ -138,6 +145,10 @@ document.addEventListener('DOMContentLoaded', () => {
     let pollingInterval = null;
     const POLLING_RATE_MS = 2000;
 
+    // --- INICIO DE MODIFICACIÓN: Añadir 'currentView' ---
+    let currentView = 'open'; // 'open' o 'closed'
+    // --- FIN DE MODIFICACIÓN ---
+
     const chatListEl = document.getElementById('chat-list');
     const chatWindowEl = document.getElementById('chat-window');
     const successModalEl = document.getElementById('success-modal');
@@ -172,7 +183,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
         chatListEl.innerHTML = '';
         if (filteredChats.length === 0) {
-            chatListEl.innerHTML = '<p style="padding: 20px; text-align: center; color: #6b7280;">No hay chats activos asignados.</p>';
+            // --- INICIO DE MODIFICACIÓN: Mensaje dinámico ---
+            const message = currentView === 'open' 
+                ? 'No hay chats activos asignados.' 
+                : 'No se encontraron chats archivados.';
+            chatListEl.innerHTML = `<p style="padding: 20px; text-align: center; color: #6b7280;">${message}</p>`;
+            // --- FIN DE MODIFICACIÓN ---
             return;
         }
 
@@ -228,9 +244,29 @@ document.addEventListener('DOMContentLoaded', () => {
     };
 
     const renderChatWindow = (chatId) => {
-        const chat = allChats.find(c => c.id === chatId);
+        // --- INICIO DE MODIFICACIÓN: Ocultar/Mostrar acciones según el estado ---
+        // El chat puede estar en allChats (que ahora se basa en chatDataMap)
+        const chat = chatDataMap.get(chatId); 
         if (!chat) { renderEmptyState(); return; }
         const { initials, color } = getAvatarDetails(chat.name, chat.id);
+
+        // Determinar si el chat está activo o cerrado para mostrar/ocultar botones
+        const isClosed = currentView === 'closed';
+        
+        // Si está cerrado, no mostramos "Marcar como Resuelto"
+        const archiveAction = isClosed ? '' : '<a href="#" data-action="archive"><i class="fas fa-archive"></i> Marcar como Resuelto</a>';
+        // Si está cerrado, no mostramos "Transferir"
+        const transferAction = isClosed ? '' : '<a href="#" data-action="transfer" class="danger-action"><i class="fas fa-random"></i> Transferir Chat</a>';
+        // Si ambas están vacías, no mostrar el menú
+        const actionsMenu = (archiveAction || transferAction) 
+            ? `<div class="header-actions">
+                   <button class="actions-menu-btn" id="actions-menu-btn"><i class="fas fa-ellipsis-v"></i></button>
+                   <div class="actions-dropdown" id="actions-dropdown">
+                       ${archiveAction}
+                       ${transferAction}
+                   </div>
+               </div>`
+            : '';
 
         chatWindowEl.innerHTML = `
             <header class="chat-window-header">
@@ -238,13 +274,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     <div class="avatar" style="background-color: ${color};">${initials}</div>
                     <div class="contact-details"> <div class="name">${chat.name}</div> <div class="phone">${chat.phone}</div> </div>
                 </div>
-                <div class="header-actions">
-                    <button class="actions-menu-btn" id="actions-menu-btn"><i class="fas fa-ellipsis-v"></i></button>
-                    <div class="actions-dropdown" id="actions-dropdown">
-                        <a href="#" data-action="archive"><i class="fas fa-archive"></i> Marcar como Resuelto</a>
-                        <a href="#" data-action="transfer" class="danger-action"><i class="fas fa-random"></i> Transferir Chat</a>
-                        </div>
-                </div>
+                ${actionsMenu}
             </header>
             <div class="message-area" id="message-area"><p style="text-align:center; color: #6b7280;">Cargando mensajes...</p></div>
             <footer class="message-input-area">
@@ -253,6 +283,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     <button type="submit"><i class="fas fa-paper-plane"></i></button>
                 </form>
             </footer>`;
+        // --- FIN DE MODIFICACIÓN ---
         fetchMessagesForChat(chatId);
     };
 
@@ -356,7 +387,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const pollChats = async (forceListUpdate = false) => {
         try {
-            const response = await fetch('/api/chats');
+            // --- INICIO DE MODIFICACIÓN: Pasa el 'currentView' como query param ---
+            const response = await fetch(`/api/chats?status=${currentView}`);
+            // --- FIN DE MODIFICACIÓN ---
+            
             if (!response.ok) {
                 console.error('Error en polling:', response.status);
                 if(response.status === 401) { // Error de autenticación
@@ -429,13 +463,31 @@ document.addEventListener('DOMContentLoaded', () => {
         pollingInterval = null;
     };
 
+    // --- INICIO DE MODIFICACIÓN: Añadir listener a las pestañas ---
     tabs.forEach(tab => {
         tab.addEventListener('click', () => {
+            // Si ya está activa, no hacer nada
+            if (tab.classList.contains('active')) return;
+            
+            // Quitar 'active' de todas
+            tabs.forEach(t => t.classList.remove('active'));
+            // Añadir 'active' a la clickeada
+            tab.classList.add('active');
+            
+            // Actualizar la vista actual
+            currentView = tab.dataset.view;
+            
+            // Limpiar estado
             activeChatId = null;
+            allChats = [];
+            chatDataMap.clear(); // Limpiar el mapa para forzar recarga completa
+            
+            // Recargar datos y limpiar ventana
             pollChats(true);
             renderEmptyState();
         });
     });
+    // --- FIN DE MODIFICACIÓN ---
 
     searchInput.addEventListener('input', (e) => {
         renderChatList(e.target.value.trim());
@@ -509,8 +561,20 @@ document.addEventListener('DOMContentLoaded', () => {
                     tempBubble.textContent = result.message.text; // (No debería cambiar, pero es buena práctica)
                     tempBubble.style.opacity = '1'; // Confirmar envío
                     
-                    // Actualizar la lista de chats (para 'last_message')
-                    await pollChats(true); 
+                    // --- INICIO DE MODIFICACIÓN: Forzar recarga de UI ---
+                    // Si estábamos en 'archivados', el chat ahora se movió
+                    // a 'activos'. Debemos forzar una recarga de la lista,
+                    // lo que hará que desaparezca de la vista actual.
+                    if (currentView === 'closed') {
+                        openSuccessModal('Chat reactivado y movido a "Activos".');
+                        activeChatId = null;
+                        renderEmptyState();
+                        pollChats(true); // Recarga la lista (el chat desaparecerá)
+                    } else {
+                        // Si ya estaba activo, solo actualizar 'last_message'
+                        await pollChats(true); 
+                    }
+                    // --- FIN DE MODIFICACIÓN ---
                     
                 } catch (error) {
                     console.error(error);

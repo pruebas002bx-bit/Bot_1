@@ -158,9 +158,48 @@
         .btn { padding: 12px 25px; font-size: 16px; font-weight: 600; border: none; border-radius: 12px; cursor: pointer; transition: all 0.2s; }
         .btn-secondary { background: #f1f5f9; color: var(--text-secondary); }
         .btn-primary { background: var(--accent-color); color: white; }
+        .btn-primary:hover { background: var(--accent-hover); }
+        .btn-primary:disabled { background: #9ca3af; cursor: not-allowed; }
         
         .toast { position: fixed; bottom: -100px; left: 50%; transform: translateX(-50%); background-color: var(--accent-color); color: white; padding: 15px 25px; border-radius: 12px; box-shadow: 0 5px 15px rgba(0,0,0,0.2); font-weight: 500; z-index: 2000; transition: bottom 0.5s ease; }
         .toast.show { bottom: 30px; }
+
+        /* --- INICIO DE MODIFICACIÓN: Estilos para el nuevo formulario --- */
+        .form-group {
+            margin-bottom: 20px;
+        }
+        .form-group label {
+            display: block;
+            font-weight: 600;
+            color: var(--text-secondary);
+            margin-bottom: 8px;
+        }
+        .form-group input[type="text"],
+        .form-group input[type="file"] {
+            width: 100%;
+            padding: 12px;
+            border: 1px solid #d1d5db;
+            border-radius: 8px;
+            font-size: 1em;
+            background-color: rgba(249, 250, 251, 0.8);
+        }
+        
+        .form-group input[type="file"] {
+            padding: 9px;
+        }
+
+        .form-group input:focus {
+             outline: none;
+             border-color: var(--accent-color);
+             background: #fff;
+        }
+        
+        .form-group p {
+            font-size: 0.85em;
+            color: var(--text-secondary);
+            margin-top: 5px;
+        }
+        /* --- FIN DE MODIFICACIÓN --- */
     </style>
 </head>
 <body>
@@ -194,7 +233,32 @@
                     </div>
                 </div>
             </div>
-        </main>
+            
+            <div class="config-card" id="import-card">
+                <div class="card-header" style="border-bottom: none; margin-bottom: 0;">
+                    <h3>Importar Historial de Chat</h3>
+                </div>
+                <form id="uploadChatForm">
+                    <div class="form-group">
+                        <label for="chatPhone">Número del Cliente (Formato Twilio)</label>
+                        <input type="text" id="chatPhone" name="phone" placeholder="whatsapp:+573001234567" required>
+                        <p>Debe incluir "whatsapp:" y el código de país.</p>
+                    </div>
+                    <div class="form-group">
+                        <label for="agentName">Tu Nombre (Como aparece en el chat)</label>
+                        <input type="text" id="agentName" name="agentName" placeholder="Ej: Juan Pérez" required>
+                        <p>Usado para diferenciar tus mensajes de los del cliente.</p>
+                    </div>
+                    <div class="form-group">
+                        <label for="chatFile">Archivo de Chat (.txt)</label>
+                        <input type="file" id="chatFile" name="file" accept=".txt" required>
+                    </div>
+                    <button type="submit" class="btn btn-primary" id="uploadSubmitBtn">
+                        <i class="fas fa-upload"></i> Cargar Historial
+                    </button>
+                </form>
+            </div>
+            </main>
     </div>
 
     <div class="modal-overlay" id="modalOverlay">
@@ -240,11 +304,30 @@
             const modalForm = document.getElementById('modalForm');
             const toastNotification = document.getElementById('toastNotification');
             
+            // --- INICIO: Simulación de carga de datos ---
+            // En una app real, esto vendría de /api/bot_config
             let config = {
                 botStatus: true,
                 whatsappNumber: '+57 3132217862',
                 welcomeMessage: '¡Hola! Bienvenido a nuestro servicio de atención. ¿En qué puedo ayudarte hoy?'
             };
+
+            const loadConfigData = async () => {
+                try {
+                    const response = await fetch('/api/bot_config');
+                    if (!response.ok) throw new Error('Error al cargar config');
+                    const data = await response.json();
+                    config.botStatus = data.is_active;
+                    config.whatsappNumber = data.whatsapp_number;
+                    config.welcomeMessage = data.welcome_message;
+                    renderData();
+                } catch (error) {
+                    console.error(error);
+                    showToast('Error al cargar la configuración.', true);
+                    renderData(); // Renderizar con valores por defecto
+                }
+            };
+            // --- FIN: Simulación de carga de datos ---
 
             const renderData = () => {
                 const statusDisplay = document.getElementById('botStatusDisplay');
@@ -254,10 +337,21 @@
                 document.getElementById('displayWelcomeMessage').textContent = config.welcomeMessage;
             };
 
-            const showToast = (message) => {
+            const showToast = (message, isError = false) => {
                 toastNotification.textContent = message;
+                // --- INICIO DE MODIFICACIÓN: Estilo de error para toast ---
+                if (isError) {
+                    toastNotification.style.backgroundColor = '#ef4444'; // Rojo de error
+                } else {
+                    toastNotification.style.backgroundColor = 'var(--accent-color)'; // Color normal
+                }
+                // --- FIN DE MODIFICACIÓN ---
                 toastNotification.classList.add('show');
-                setTimeout(() => toastNotification.classList.remove('show'), 3000);
+                setTimeout(() => {
+                    toastNotification.classList.remove('show');
+                    // Resetear color
+                    toastNotification.style.backgroundColor = 'var(--accent-color)';
+                }, 4000); // Más tiempo para errores
             };
 
             const openModal = () => {
@@ -277,18 +371,87 @@
                 }
             });
 
-            modalForm.addEventListener('submit', e => {
+            modalForm.addEventListener('submit', async (e) => {
                 e.preventDefault();
-                config.botStatus = document.getElementById('botStatus').checked;
-                config.whatsappNumber = document.getElementById('whatsappNumber').value;
-                config.welcomeMessage = document.getElementById('welcomeMessage').value;
                 
-                renderData();
-                closeModal();
-                showToast('Cambios guardados con éxito');
+                const newData = {
+                    is_active: document.getElementById('botStatus').checked,
+                    whatsapp_number: document.getElementById('whatsappNumber').value,
+                    welcome_message: document.getElementById('welcomeMessage').value
+                };
+
+                try {
+                    const response = await fetch('/api/bot_config', {
+                        method: 'PUT',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(newData)
+                    });
+                    if (!response.ok) throw new Error('Error al guardar');
+                    
+                    // Actualizar config local
+                    config.botStatus = newData.is_active;
+                    config.whatsappNumber = newData.whatsapp_number;
+                    config.welcomeMessage = newData.welcome_message;
+
+                    renderData();
+                    closeModal();
+                    showToast('Cambios guardados con éxito');
+
+                } catch (error) {
+                    console.error(error);
+                    showToast('Error al guardar los cambios.', true);
+                }
             });
 
-            renderData();
+            // --- INICIO DE MODIFICACIÓN: Lógica de subida de archivos ---
+            const uploadForm = document.getElementById('uploadChatForm');
+            const uploadBtn = document.getElementById('uploadSubmitBtn');
+            const chatPhoneInput = document.getElementById('chatPhone');
+            const agentNameInput = document.getElementById('agentName');
+            const chatFileInput = document.getElementById('chatFile');
+
+            uploadForm.addEventListener('submit', async (e) => {
+                e.preventDefault();
+                
+                if (!chatPhoneInput.value || !agentNameInput.value || !chatFileInput.files[0]) {
+                    showToast('Por favor, completa todos los campos.', true);
+                    return;
+                }
+
+                uploadBtn.disabled = true;
+                uploadBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Cargando...';
+
+                const formData = new FormData();
+                formData.append('phone', chatPhoneInput.value);
+                formData.append('agentName', agentNameInput.value);
+                formData.append('file', chatFileInput.files[0]);
+
+                try {
+                    const response = await fetch('/api/admin/upload_chats', {
+                        method: 'POST',
+                        body: formData
+                        // No se necesita 'Content-Type', el navegador lo pone por ser FormData
+                    });
+
+                    const data = await response.json();
+
+                    if (response.ok && data.success) {
+                        showToast(data.message || 'Historial cargado con éxito.');
+                        uploadForm.reset();
+                    } else {
+                        throw new Error(data.error || 'Error desconocido al cargar el archivo.');
+                    }
+                } catch (error) {
+                    console.error('Error al subir chat:', error);
+                    showToast(error.message, true);
+                } finally {
+                    uploadBtn.disabled = false;
+                    uploadBtn.innerHTML = '<i class="fas fa-upload"></i> Cargar Historial';
+                }
+            });
+            // --- FIN DE MODIFICACIÓN ---
+
+            loadConfigData(); // Cargar datos iniciales
         });
     </script>
 </body>

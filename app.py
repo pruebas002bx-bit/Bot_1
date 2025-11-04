@@ -3,6 +3,7 @@ import logging
 import re  # <--- CORRECCIÓN: Añadido
 import json  # <--- CORRECCIÓN: Añadido
 from flask import Flask, render_template, request, jsonify, redirect, url_for
+from werkzeug.utils import secure_filename # <-- AÑADIDO PARA UPLOAD
 from flask_sqlalchemy import SQLAlchemy
 from dotenv import load_dotenv
 from twilio.twiml.messaging_response import MessagingResponse
@@ -103,6 +104,12 @@ class Conversation(db.Model):
     bot_role_id = db.Column(db.Integer, db.ForeignKey('bot_roles.id'), nullable=False)
     bot_role = db.relationship('BotRole', back_populates='conversations')
     messages = db.relationship('Message', back_populates='conversation', cascade="all, delete-orphan", order_by='Message.timestamp')
+    
+    # --- INICIO DE MODIFICACIÓN ---
+    # Campo para rastrear chats importados
+    import_source = db.Column(db.String(100), nullable=True, default=None)
+    # --- FIN DE MODIFICACIÓN ---
+    
     pending_counted = db.Column(db.Boolean, default=False) # Flag para saber si ya incrementó/decrementó pending
 
     def get_last_message(self):
@@ -582,31 +589,45 @@ def whatsapp_webhook():
 
 
 # --- APIS DE CHAT (PROTEGIDAS Y FILTRADAS) ---
+
+# --- INICIO DE MODIFICACIÓN: get_chats() ---
 @app.route('/api/chats', methods=['GET'])
 @login_required
 def get_chats():
     try:
-        open_conversations = []
+        # Leer el estado deseado desde los query params, por defecto 'open'
+        chat_status = request.args.get('status', 'open') 
+        if chat_status not in ['open', 'closed']:
+            chat_status = 'open'
+
+        conversations_query = None
         if current_user.role == 'Admin':
-            # Admin ve todos los chats 'open'
-            open_conversations = Conversation.query.filter_by(status='open').options(
+            # Admin ve todos los chats del estado solicitado
+            conversations_query = Conversation.query.filter_by(status=chat_status).options(
                 db.joinedload(Conversation.messages),
                 db.joinedload(Conversation.bot_role)
-            ).order_by(Conversation.updated_at.desc()).all()
+            )
         else:
-            # Soporte ve solo chats 'open' de sus roles asignados
+            # Soporte ve solo chats del estado solicitado de sus roles asignados
             assigned_role_ids = [role.id for role in current_user.assigned_roles]
             if assigned_role_ids:
-                open_conversations = Conversation.query.filter(
+                conversations_query = Conversation.query.filter(
                     Conversation.bot_role_id.in_(assigned_role_ids),
-                    Conversation.status == 'open'
+                    Conversation.status == chat_status
                 ).options(
                     db.joinedload(Conversation.messages),
                     db.joinedload(Conversation.bot_role)
-                ).order_by(Conversation.updated_at.desc()).all()
+                )
             else:
                 logging.info(f"Usuario {current_user.username} (Soporte) no tiene roles asignados.")
+                return jsonify([]) # Devolver lista vacía
 
+        # Asegurarse de que la query no sea None antes de continuar
+        if conversations_query is None:
+             return jsonify([])
+
+        open_conversations = conversations_query.order_by(Conversation.updated_at.desc()).all()
+        
         chat_list = []
         for convo in open_conversations:
             last_msg = convo.get_last_message()
@@ -625,6 +646,7 @@ def get_chats():
     except Exception as e:
         logging.error(f"Error en /api/chats: {e}")
         return jsonify({"error": str(e)}), 500
+# --- FIN DE MODIFICACIÓN: get_chats() ---
 
 @app.route('/api/chats/<int:convo_id>/messages', methods=['GET'])
 @login_required
@@ -634,15 +656,16 @@ def get_chat_messages(convo_id):
         assigned_role_ids = [role.id for role in current_user.assigned_roles]
         if convo.bot_role_id not in assigned_role_ids:
             # CORRECCIÓN: Permitir ver si el chat *estuvo* en su rol (transferido)
-            if convo.status == 'open': # Solo restringir si sigue abierto
-                return jsonify({"error": "No autorizado para ver este chat"}), 403
+            # Modificación: Esta lógica se aplica a CUALQUIER estado (open o closed)
+            # if convo.status == 'open': # Restricción eliminada
+            return jsonify({"error": "No autorizado para ver este chat"}), 403
             
-    # Marcar como leído
-    if convo.unread_count > 0:
+    # Marcar como leído (solo si está 'open' y tiene no leídos)
+    if convo.status == 'open' and convo.unread_count > 0:
         convo.unread_count = 0
     
-    # Decrementar 'pendientes' si se abre por primera vez
-    if convo.pending_counted:
+    # Decrementar 'pendientes' si se abre por primera vez (solo si está 'open')
+    if convo.status == 'open' and convo.pending_counted:
         role = convo.bot_role
         if role and role.chats_pending > 0:
             role.chats_pending = role.chats_pending - 1
@@ -653,14 +676,18 @@ def get_chat_messages(convo_id):
     messages = [{"sender": msg.sender_type, "text": msg.content} for msg in convo.messages]
     return jsonify(messages)
 
+# --- INICIO DE MODIFICACIÓN: send_chat_message() ---
 @app.route('/api/chats/<int:convo_id>/messages', methods=['POST'])
 @login_required
 def send_chat_message(convo_id):
     convo = Conversation.query.get_or_404(convo_id)
+    
+    # Lógica de permisos (se aplica a 'open' y 'closed')
     if current_user.role != 'Admin':
         assigned_role_ids = [role.id for role in current_user.assigned_roles]
         if convo.bot_role_id not in assigned_role_ids:
             return jsonify({"error": "No autorizado para enviar a este chat"}), 403
+            
     data = request.get_json()
     content = data.get('text')
     if not content: return jsonify({"error": "El texto no puede estar vacío"}), 400
@@ -668,16 +695,34 @@ def send_chat_message(convo_id):
         logging.error("Twilio no está configurado para enviar mensajes.")
         return jsonify({"error": "El servicio de envío no está configurado"}), 500
     try:
+        # Reactivar chat si está cerrado
+        if convo.status == 'closed':
+            logging.info(f"Reactivando chat {convo_id} (estado 'closed') por {current_user.name}.")
+            convo.status = 'open'
+            convo.unread_count = 0 # El agente lo está abriendo, no el cliente
+            convo.pending_counted = True # Marcar como pendiente para el rol
+            
+            role = convo.bot_role
+            if role:
+                # Revertir contadores
+                if role.chats_resolved and role.chats_resolved > 0:
+                    role.chats_resolved = role.chats_resolved - 1
+                role.chats_pending = (role.chats_pending or 0) + 1
+                logging.info(f"Contadores del Rol '{role.title}' actualizados: Pendientes={role.chats_pending}, Resueltos={role.chats_resolved}")
+
         twilio_client.messages.create(from_=TWILIO_WHATSAPP_NUMBER, body=content, to=convo.user_phone)
+        
         new_message = Message(conversation_id=convo.id, sender_type='agent', content=content)
         db.session.add(new_message)
         convo.updated_at = datetime.utcnow()
+        
         db.session.commit()
         return jsonify({"success": True, "message": {"sender": "agent", "text": content}}), 201
     except Exception as e:
         logging.error(f"Error al enviar mensaje de Twilio o guardar en BD: {e}")
         db.session.rollback()
         return jsonify({"error": str(e)}), 500
+# --- FIN DE MODIFICACIÓN: send_chat_message() ---
 
 
 @app.route('/api/chats/<int:convo_id>/resolve', methods=['POST'])
@@ -758,6 +803,115 @@ def transfer_chat(convo_id):
         db.session.rollback()
         logging.error(f"Error al transferir chat {convo_id}: {e}")
         return jsonify({"error": str(e)}), 500
+
+# --- INICIO DE NUEVA RUTA: /api/admin/upload_chats ---
+@app.route('/api/admin/upload_chats', methods=['POST'])
+@login_required
+def upload_chats():
+    admin_check = check_admin()
+    if admin_check: return admin_check
+
+    try:
+        if 'file' not in request.files:
+            return jsonify({"error": "No se encontró el archivo"}), 400
+        
+        file = request.files['file']
+        user_phone = request.form.get('phone')
+        agent_name = request.form.get('agentName')
+
+        if not file or file.filename == '':
+            return jsonify({"error": "No se seleccionó ningún archivo"}), 400
+        if not user_phone or not user_phone.startswith('whatsapp:'):
+            return jsonify({"error": "El número de teléfono debe estar en formato 'whatsapp:+XXXXXXXXXX'"}), 400
+        if not agent_name:
+            return jsonify({"error": "Debe especificar el 'Nombre del Agente' tal como aparece en el chat"}), 400
+
+        # Buscar el rol "General" para asignarlo
+        general_role = BotRole.query.filter_by(title='General').first()
+        if not general_role:
+             # Fallback: asignarlo al primer rol de bot que exista
+             general_role = BotRole.query.first()
+             if not general_role:
+                 return jsonify({"error": "No se encontraron roles de bot para asignar el chat importado"}), 500
+
+        # Crear o buscar la conversación
+        convo = Conversation.query.filter_by(user_phone=user_phone).first()
+        if not convo:
+            convo = Conversation(
+                user_phone=user_phone,
+                status='closed', # Importar como cerrado por defecto
+                bot_role_id=general_role.id,
+                import_source='whatsapp_txt_upload'
+            )
+            db.session.add(convo)
+        else:
+            # Si ya existe, solo actualizamos los metadatos y borramos mensajes antiguos
+            convo.status = 'closed'
+            convo.import_source = 'whatsapp_txt_upload'
+            # Borrar mensajes antiguos para evitar duplicados en la re-importación
+            Message.query.filter_by(conversation_id=convo.id).delete()
+
+        db.session.flush() # Para obtener el convo.id
+
+        content = file.read().decode('utf-8')
+        lines = content.splitlines()
+        
+        # Regex para parsear el formato: [DD/MM/YYYY, HH:MM:SS] Nombre: Mensaje
+        # Esto no manejará mensajes multilínea.
+        chat_regex = re.compile(r"\[(\d{1,2}/\d{1,2}/\d{4}), (\d{1,2}:\d{2}:\d{2})\] (.*?): (.*)")
+        
+        messages_added = 0
+        last_message_time = None
+
+        for line in lines:
+            match = chat_regex.match(line)
+            if match:
+                date_str, time_str, author, message_content = match.groups()
+                
+                try:
+                    # Asumimos formato DD/MM/YYYY
+                    timestamp_str = f"{date_str} {time_str}"
+                    timestamp = datetime.strptime(timestamp_str, '%d/%m/%Y %H:%M:%S')
+                    last_message_time = timestamp
+                except ValueError:
+                    # Intentar formato MM/DD/YYYY
+                    try:
+                        timestamp_str = f"{date_str} {time_str}" # Re-asignar por si acaso
+                        timestamp = datetime.strptime(timestamp_str, '%m/%d/%Y %H:%M:%S')
+                        last_message_time = timestamp
+                    except ValueError:
+                        logging.warning(f"Formato de fecha no reconocido en línea: {line}")
+                        continue # Saltar esta línea
+
+                sender_type = 'system' # Default
+                if author == agent_name:
+                    sender_type = 'agent'
+                else:
+                    sender_type = 'user' # Asumir que todo lo demás es el cliente
+
+                new_msg = Message(
+                    conversation_id=convo.id,
+                    sender_type=sender_type,
+                    content=message_content,
+                    timestamp=timestamp
+                )
+                db.session.add(new_msg)
+                messages_added += 1
+
+        # Actualizar el timestamp de la conversación al del último mensaje
+        if last_message_time:
+            convo.updated_at = last_message_time
+        
+        db.session.commit()
+        
+        return jsonify({"success": True, "message": f"Chat importado para {user_phone}. Se añadieron {messages_added} mensajes."})
+
+    except Exception as e:
+        db.session.rollback()
+        logging.error(f"Error fatal en /api/admin/upload_chats: {e}")
+        logging.exception(e)
+        return jsonify({"error": str(e)}), 500
+# --- FIN DE NUEVA RUTA ---
 
 
 # --- APIs DE DASHBOARD ---
