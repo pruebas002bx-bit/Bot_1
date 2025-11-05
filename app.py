@@ -332,16 +332,17 @@ def send_reply(phone_number, message_content):
         logging.error("BAILEYS_BOT_URL no está configurada. No se puede enviar respuesta.")
         return False
 
-    # El endpoint que creamos en bot.js
     send_url = f"{baileys_bot_url}/send"
     payload = {
-        "number": phone_number, # app.py ya lo guarda como 'whatsapp:+...'
+        "number": phone_number, 
         "message": message_content
     }
     
     try:
         logging.info(f"Enviando respuesta a Baileys: {send_url} (Para: {phone_number})")
-        response = requests.post(send_url, json=payload, timeout=10)
+        # --- MODIFICACIÓN: Aumentar el timeout ---
+        response = requests.post(send_url, json=payload, timeout=30)
+        # --- FIN DE MODIFICACIÓN ---
         
         if response.status_code != 200:
             logging.error(f"El bot de Baileys respondió con {response.status_code}: {response.text}")
@@ -688,6 +689,7 @@ def get_chat_messages(convo_id):
 def send_chat_message(convo_id):
     convo = Conversation.query.get_or_404(convo_id)
     
+    # Lógica de permisos
     if current_user.role != 'Admin':
         assigned_role_ids = [role.id for role in current_user.assigned_roles]
         if convo.bot_role_id not in assigned_role_ids:
@@ -697,12 +699,14 @@ def send_chat_message(convo_id):
     content = data.get('text')
     if not content: return jsonify({"error": "El texto no puede estar vacío"}), 400
 
+    # Obtener la URL del bot de Baileys desde las variables de entorno
     baileys_bot_url = os.getenv('BAILEYS_BOT_URL')
     if not baileys_bot_url:
         logging.error("BAILEYS_BOT_URL no está configurada. No se puede enviar mensaje.")
         return jsonify({"error": "El servicio de envío no está configurado"}), 500
 
     try:
+        # Reactivar chat si está cerrado
         if convo.status == 'closed':
             logging.info(f"Reactivando chat {convo_id} (estado 'closed') por {current_user.name}.")
             convo.status = 'open'
@@ -711,20 +715,26 @@ def send_chat_message(convo_id):
             
             role = convo.bot_role
             if role:
+                # Revertir contadores
                 if role.chats_resolved and role.chats_resolved > 0:
                     role.chats_resolved = role.chats_resolved - 1
                 role.chats_pending = (role.chats_pending or 0) + 1
                 logging.info(f"Contadores del Rol '{role.title}' actualizados: Pendientes={role.chats_pending}, Resueltos={role.chats_resolved}")
 
-        # --- REEMPLAZO DE TWILIO (YA ESTABA HECHO) ---
+        # --- REEMPLAZO DE TWILIO ---
+        # Hacemos una petición POST al endpoint /send de nuestro bot.js
+        
         send_url = f"{baileys_bot_url}/send"
         payload = {
-            "number": convo.user_phone, 
+            "number": convo.user_phone, # app.py ya lo guarda como 'whatsapp:+...'
             "message": content
         }
         
-        response = requests.post(send_url, json=payload, timeout=10)
+        # --- CORRECCIÓN DE TIMEOUT ---
+        # Aumentamos el timeout a 30 segundos para manejar el "cold start" de OnRender
+        response = requests.post(send_url, json=payload, timeout=30)
         
+        # Si el bot de Baileys da error, lo reportamos
         if response.status_code != 200:
             raise Exception(f"El bot de Baileys respondió con {response.status_code}: {response.text}")
         # --- FIN DE REEMPLAZO ---
@@ -740,7 +750,6 @@ def send_chat_message(convo_id):
         logging.error(f"Error al enviar mensaje (vía Baileys) o guardar en BD: {e}")
         db.session.rollback()
         return jsonify({"error": str(e)}), 500
-# --- FIN DE FUNCIÓN DE ENVÍO DE AGENTE ---
 
 
 @app.route('/api/chats/<int:convo_id>/resolve', methods=['POST'])
