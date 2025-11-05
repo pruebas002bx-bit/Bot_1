@@ -926,13 +926,6 @@ def transfer_chat(convo_id):
         return jsonify({"error": str(e)}), 500
 
 # --- INICIO DE MODIFICACIÓN: APIs de Importación de Chat ELIMINADAS ---
-# Las rutas /api/imported_chats, /api/conversations/<id> (DELETE) y /api/admin/upload_chats
-# han sido reemplazadas por las nuevas APIs de Base de Datos
-# --- FIN DE MODIFICACIÓN ---
-
-
-# --- INICIO DE NUEVAS APIS: Base de Datos de Pólizas ---
-
 @app.route('/api/admin/upload_database', methods=['POST'])
 @login_required
 def upload_database():
@@ -948,23 +941,53 @@ def upload_database():
         if not file or file.filename == '':
             return jsonify({"error": "No se seleccionó ningún archivo"}), 400
         
-        # Asumimos que los encabezados están en la fila 1 (índice 0)
-        # y los datos comienzan en la fila 2 (índice 1)
-        try:
-            df = pd.read_excel(file, header=0, dtype=str).fillna('')
-        except Exception as e:
-            logging.error(f"Error al leer el Excel: {e}")
-            return jsonify({"error": f"Error al procesar el archivo Excel: {e}"}), 400
-            
+        # --- INICIO DE MODIFICACIÓN: Lógica de CSV ---
         # Nombres de columna esperados (los encabezados en A1, B1, C1...)
         expected_columns = [
             'ASEGURADORA', 'NOMBRES', 'CEDULA/NIT', 'TIPO', 'PLACA', 
             'MODELO', 'VLOR POLIZA', 'MES VENCIMIENTO', 'FECHA VENC', 'REFERENCIA'
         ]
         
+        df = None
+        
+        try:
+            # Primero, intentar con coma (estándar UTF-8)
+            file.seek(0) # Asegurar que el puntero esté al inicio
+            df = pd.read_csv(file, header=0, dtype=str, encoding='utf-8', sep=',').fillna('')
+            
+            # Si solo hay una columna, es probable que el separador sea incorrecto.
+            # Probar con punto y coma (común en Excel de Windows/Latam).
+            if len(df.columns) <= 1:
+                logging.warning("Detectada una sola columna con coma. Reintentando con punto y coma.")
+                file.seek(0) # Resetear puntero
+                df = pd.read_csv(file, header=0, dtype=str, encoding='utf-8', sep=';').fillna('')
+                
+        except UnicodeDecodeError:
+            # Si falla UTF-8, probar con latin-1, (muy común en Excel de Windows)
+            logging.warning("Error con UTF-8. Reintentando con 'latin-1' y punto y coma.")
+            try:
+                file.seek(0)
+                # Probar latin-1 con punto y coma primero
+                df = pd.read_csv(file, header=0, dtype=str, encoding='latin-1', sep=';').fillna('')
+                if len(df.columns) <= 1:
+                    logging.warning("Detectada una sola columna (latin-1) con punto y coma. Reintentando con coma.")
+                    file.seek(0)
+                    df = pd.read_csv(file, header=0, dtype=str, encoding='latin-1', sep=',').fillna('')
+            except Exception as e:
+                 logging.error(f"Error final al leer CSV (latin-1): {e}")
+                 return jsonify({"error": f"Error al leer el archivo. Intente guardar como 'CSV (Delimitado por comas)' o 'CSV (UTF-8)' desde Excel. Error: {e}"}), 400
+        except Exception as e:
+            logging.error(f"Error al leer el CSV: {e}")
+            return jsonify({"error": f"Error al procesar el archivo CSV: {e}"}), 400
+        # --- FIN DE MODIFICACIÓN ---
+
+        if df is None:
+             return jsonify({"error": "No se pudo procesar el DataFrame."}), 500
+
+        # Verificar columnas después de cargar
         if not all(col in df.columns for col in expected_columns):
             logging.warning(f"Columnas faltantes. Esperadas: {expected_columns}. Encontradas: {list(df.columns)}")
-            return jsonify({"error": f"El archivo Excel debe tener las columnas exactas: {', '.join(expected_columns)}"}), 400
+            return jsonify({"error": f"El archivo CSV debe tener las columnas exactas (sensible a mayúsculas): {', '.join(expected_columns)}"}), 400
             
         # 1. Borrar todos los datos antiguos
         PolicyData.query.delete()
@@ -998,7 +1021,6 @@ def upload_database():
         logging.error(f"Error fatal en /api/admin/upload_database: {e}")
         logging.exception(e)
         return jsonify({"error": f"Error interno del servidor: {e}"}), 500
-
 
 @app.route('/api/database_records', methods=['GET'])
 @login_required

@@ -239,10 +239,12 @@
                 </div>
                 <form id="uploadDatabaseForm">
                     <div class="form-group">
-                        <label for="databaseFile">Archivo de Base de Datos (.xlsx, .xls)</label>
-                        <input type="file" id="databaseFile" name="file" accept=".xlsx, .xls" required>
+                        <label for="databaseFile">Archivo de Base de Datos (.csv)</label>
+                        <input type="file" id="databaseFile" name="file" accept=".csv" required>
                         <p>
                             El archivo reemplazará <strong>TODA</strong> la base de datos existente.
+                            <br>
+                            <strong>Importante:</strong> Guarde su archivo en Excel como <strong>"CSV (delimitado por comas)"</strong> o <strong>"CSV (UTF-8)"</strong>.
                             <br>
                             Asegúrate que los encabezados (fila 1) sean: 
                             <code style="font-size: 0.9em;">ASEGURADORA, NOMBRES, CEDULA/NIT, TIPO, PLACA, MODELO, VLOR POLIZA, MES VENCIMIENTO, FECHA VENC, REFERENCIA</code>
@@ -253,6 +255,7 @@
                     </button>
                 </form>
             </div>
+
             </main>
     </div>
 
