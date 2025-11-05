@@ -462,17 +462,15 @@ def _get_agent_response_and_role(option):
             "Confírmanos por favor *cómo te podemos colaborar, qué sucedió*, y envíanos el *número de placa*.",
             "En minutos un agente te estará acompañando en la solicitud."
         ]
-    # No hay 'else' ni 'except' aquí. Si la opción no fue ninguna de las anteriores,
-    # simplemente se sigue con la última línea que es el retorno.
-
+    
     full_response = "\n\n".join(response_parts)
     
     # Se añade la nota de "escribe A para volver" SOLO para la opción 6
     if option == '6':
          full_response += "\n\n*Escribe A para volver al menú principal (si no quieres cancelar).* "
 
-    # El retorno siempre debe ser lo último en el nivel de indentación correcto (fuera de los if/elif).
     return mapeo_roles.get(option, "General"), full_response
+
 
 # Función que define la respuesta para las cotizaciones (Sub-Opciones de 2)
 def _get_cotizacion_detail(sub_option):
@@ -537,6 +535,8 @@ def _get_cotizacion_detail(sub_option):
         )
     return ""
 
+
+# --- FUNCIÓN PRINCIPAL DE LA MÁQUINA DE ESTADOS ---
 def get_ia_response_and_route(convo, message_body):
     """
     Gestiona la conversación de la IA como una máquina de estados.
@@ -548,7 +548,6 @@ def get_ia_response_and_route(convo, message_body):
         # -----------------------------------------------------
         # --- LÓGICA DE REGRESO AL MENÚ PRINCIPAL ('A') ---
         # -----------------------------------------------------
-        # Si no estamos en la fase inicial de captura de datos y el usuario escribe 'A', volvemos al menú.
         if convo.status.startswith('ia_') and convo.status not in ['ia_greeting', 'ia_ask_name', 'ia_ask_phone', 'ia_confirm_details'] and message_body.strip().upper() == 'A':
             logging.info(f"Usuario {convo.user_phone} solicitó volver al menú principal desde {convo.status}.")
             convo.status = 'ia_show_menu' 
@@ -665,6 +664,7 @@ def get_ia_response_and_route(convo, message_body):
         logging.error(f"Error en la máquina de estados de IA: {e}")
         # Fallback de seguridad: enrutar a General
         return ("route", "General")
+
 
 
 
