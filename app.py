@@ -451,30 +451,27 @@ def _get_agent_response_and_role(option):
             "_En minutos un agente te estará acompañando 🫡_"
         ]
     elif option == '6':
-        # --- INICIO DE CORRECCIÓN: Respuesta 6 (Cancelación) ---
         response_parts = [
             "Solicitud de cancelación de póliza y reintegro de dinero.📝",
             "Indícanos por favor la *placa del vehículo* y cuál es el *motivo de cancelación* de la póliza.",
             "En minutos un agente te estará acompañando en la solicitud 🫡"
         ]
-        # --- FIN DE CORRECCIÓN ---
     elif option == '7':
-        # --- INICIO DE CORRECCIÓN: Respuesta 7 (Quejas y Peticiones) ---
         response_parts = [
             "Comunicarse directamente con asesor por motivo de quejas y peticiones. ☹",
             "Confírmanos por favor *cómo te podemos colaborar, qué sucedió*, y envíanos el *número de placa*.",
             "En minutos un agente te estará acompañando en la solicitud."
         ]
-        # --- FIN DE CORRECCIÓN ---
+    # No hay 'else' ni 'except' aquí. Si la opción no fue ninguna de las anteriores,
+    # simplemente se sigue con la última línea que es el retorno.
 
     full_response = "\n\n".join(response_parts)
     
     # Se añade la nota de "escribe A para volver" SOLO para la opción 6
-    # La opción 7 no lo necesita porque es una ruta directa para quejas.
     if option == '6':
          full_response += "\n\n*Escribe A para volver al menú principal (si no quieres cancelar).* "
 
-    # Esta línea debe estar al nivel del bloque IF/ELSE (dentro de la función, pero no dentro de un IF)
+    # El retorno siempre debe ser lo último en el nivel de indentación correcto (fuera de los if/elif).
     return mapeo_roles.get(option, "General"), full_response
 
 # Función que define la respuesta para las cotizaciones (Sub-Opciones de 2)
