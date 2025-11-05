@@ -8,4 +8,4 @@ Flask-Login
 psycopg2-binary
 gunicorn
 pandas
-openpyxl
+openpyxl==3.0.10
