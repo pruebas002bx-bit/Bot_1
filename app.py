@@ -611,17 +611,20 @@ def baileys_webhook():
 @login_required
 def get_chats():
     try:
+        # Leer el estado deseado desde los query params, por defecto 'open'
         chat_status = request.args.get('status', 'open') 
         if chat_status not in ['open', 'closed']:
             chat_status = 'open'
 
         conversations_query = None
         if current_user.role == 'Admin':
+            # Admin ve todos los chats del estado solicitado
             conversations_query = Conversation.query.filter_by(status=chat_status).options(
                 db.joinedload(Conversation.messages),
                 db.joinedload(Conversation.bot_role)
             )
         else:
+            # Soporte ve solo chats del estado solicitado de sus roles asignados
             assigned_role_ids = [role.id for role in current_user.assigned_roles]
             if assigned_role_ids:
                 conversations_query = Conversation.query.filter(
@@ -633,8 +636,9 @@ def get_chats():
                 )
             else:
                 logging.info(f"Usuario {current_user.username} (Soporte) no tiene roles asignados.")
-                return jsonify([]) 
+                return jsonify([]) # Devolver lista vacía
 
+        # Asegurarse de que la query no sea None antes de continuar
         if conversations_query is None:
              return jsonify([])
 
@@ -643,10 +647,17 @@ def get_chats():
         chat_list = []
         for convo in open_conversations:
             last_msg = convo.get_last_message()
+            
+            # --- INICIO DE CORRECCIÓN ---
+            # Limpiamos el JID (ej: "12345@lid" o "whatsapp:+12345") para la UI
+            clean_phone = convo.user_phone.split('@')[0] # Obtiene la parte antes del '@'
+            clean_phone = clean_phone.replace('whatsapp:', '').replace('+', '') # Limpieza extra por si acaso
+            # --- FIN DE CORRECCIÓN ---
+            
             chat_list.append({
                 "id": convo.id,
-                "name": convo.user_phone.replace('whatsapp:', ''),
-                "phone": convo.user_phone.replace('whatsapp:', ''),
+                "name": clean_phone, # <-- Usar el número limpio
+                "phone": clean_phone, # <-- Usar el número limpio
                 "time": last_msg.timestamp.strftime("%I:%M %p") if last_msg and last_msg.timestamp else 'N/A',
                 "unread": convo.unread_count or 0,
                 "last_message": last_msg.content if last_msg else "Sin mensajes",
@@ -657,6 +668,7 @@ def get_chats():
         return jsonify(chat_list)
     except Exception as e:
         logging.error(f"Error en /api/chats: {e}")
+        logging.exception(e) # Imprime el stack trace para más detalles
         return jsonify({"error": str(e)}), 500
 
 @app.route('/api/chats/<int:convo_id>/messages', methods=['GET'])
