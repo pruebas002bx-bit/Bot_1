@@ -416,23 +416,82 @@ Escribe el número de tu solicitud:
 Agradecemos la confianza depositada en nuestra labor."""
 
     try:
-        # --- INICIO DE MODIFICACIÓN: Nuevo estado para usuarios conocidos ---
         # --- ESTADO 0: Saludo (Usuario Conocido) ('ia_greeting_known') ---
         if convo.status == 'ia_greeting_known':
             convo.status = 'ia_show_menu' # Actualizar estado
             db.session.add(convo)
             # Saludar y enviar el menú principal personalizado
             return ("chat", get_main_menu(convo.user_display_name))
-        # --- FIN DE MODIFICACIÓN ---
 
         # --- ESTADO 1: Saludo Inicial ('ia_greeting') ---
         elif convo.status == 'ia_greeting':
             convo.status = 'ia_ask_name' # Actualizar estado
             db.session.add(convo)
             return ("chat", "Hola! Bienvenido a VTN SEGUROS - Grupo Montenegro. Para nosotros es un gusto atenderte. Por favor indícame tu nombre completo.")
-        
-        # (El resto de la función 'ia_ask_name', 'ia_ask_phone', etc., permanece sin cambios)
 
+        # --- ESTADO 2: Esperando el Nombre ('ia_ask_name') ---
+        elif convo.status == 'ia_ask_name':
+            convo.user_display_name = message_body.strip() # Guardar nombre
+            convo.status = 'ia_ask_phone' # Actualizar estado
+            db.session.add(convo)
+            return ("chat", f"Gracias {convo.user_display_name}. Ahora, por favor, indícame tu número de celular.")
+
+        # --- ESTADO 3: Esperando el Teléfono ('ia_ask_phone') ---
+        elif convo.status == 'ia_ask_phone':
+            convo.user_reported_phone = message_body.strip() # Guardar teléfono
+            convo.status = 'ia_confirm_details' # Actualizar estado
+            db.session.add(convo)
+            return ("chat", f"Tu nombre es {convo.user_display_name} y tu celular es el {convo.user_reported_phone}. ¿Es esto correcto? (Responde 'sí' o 'no')")
+
+        # --- ESTADO 4: Esperando Confirmación ('ia_confirm_details') ---
+        elif convo.status == 'ia_confirm_details':
+            respuesta_limpia = message_body.strip().lower()
+            
+            if respuesta_limpia in ['sí', 'si', 's', 'correcto', 'si es']:
+                convo.status = 'ia_show_menu' # Actualizar estado
+                db.session.add(convo)
+                # Enviar el menú principal personalizado
+                return ("chat", get_main_menu(convo.user_display_name))
+            
+            elif respuesta_limpia in ['no', 'n', 'incorrecto']:
+                # Reiniciar el proceso
+                convo.status = 'ia_ask_name'
+                convo.user_display_name = None # Borrar datos
+                convo.user_reported_phone = None # Borrar datos
+                db.session.add(convo)
+                return ("chat", "Entendido, empecemos de nuevo. Por favor indícame tu nombre completo.")
+            
+            else:
+                # No entendió, repetir la pregunta de confirmación
+                return ("chat", f"No entendí tu respuesta. Por favor, dime 'sí' o 'no'.\n\n¿Tus datos son correctos?\nNombre: {convo.user_display_name}\nCelular: {convo.user_reported_phone}")
+
+        # --- ESTADO 5: Mostrando el Menú (Esperando opción 1-7) ('ia_show_menu') ---
+        elif convo.status == 'ia_show_menu':
+            opcion = message_body.strip()
+            
+            if opcion in mapeo_roles:
+                role_title = mapeo_roles[opcion]
+                # ¡Éxito! Enrutar al agente
+                return ("route", role_title)
+            else:
+                # Opción inválida, repetir el menú
+                return ("chat", f"La opción '{opcion}' no es válida. Por favor, selecciona un número del 1 al 7.\n\n" + get_main_menu(convo.user_display_name))
+        
+        # --- ESTADO FALLBACK (Por si acaso) ---
+        else:
+            convo.status = 'ia_greeting' # Reiniciar
+            db.session.add(convo)
+            return ("chat", "Parece que hubo un error. Empecemos de nuevo. Hola! Bienvenido a VTN SEGUROS...")
+
+    # --- INICIO DE CORRECCIÓN ---
+    # Este bloque 'except' debe estar al mismo nivel de indentación
+    # que el bloque 'try' de arriba.
+    except Exception as e:
+        logging.error(f"Error en la máquina de estados de IA: {e}")
+        # Fallback de seguridad: enrutar a General
+        return ("route", "General")
+    # --- FIN DE CORRECCIÓN ---
+# --- FIN DE REESCRITURA ---
 
 # --- WEBHOOK MODIFICADO PARA BAILEYS (CON MÁQUINA DE ESTADOS) ---
 @app.route('/api/baileys/webhook', methods=['POST'])
