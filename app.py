@@ -348,7 +348,6 @@ def update_bot_config():
     db.session.commit()
     return jsonify({'message': 'Configuración del bot actualizada correctamente'})
 
-# --- LÓGICA DEL WEBHOOK (MODIFICADA PARA BAILEYS) ---
 
 # --- NUEVA: Función helper para enviar respuestas a Baileys ---
 def send_reply(phone_number, message_content):
@@ -384,7 +383,7 @@ def send_reply(phone_number, message_content):
         return False
 
 
-# --- REEMPLAZO COMPLETO PARA get_ia_response_and_route ---
+# --- REEMPLAZO COMPLETO PARA get_ia_response_and_route (INDENTACIÓN VERIFICADA) ---
 
 # Función para obtener el menú principal (con formato)
 def _get_main_menu(nombre_usuario):
@@ -664,8 +663,6 @@ def get_ia_response_and_route(convo, message_body):
         logging.error(f"Error en la máquina de estados de IA: {e}")
         # Fallback de seguridad: enrutar a General
         return ("route", "General")
-
-
 
 
 # --- WEBHOOK MODIFICADO PARA BAILEYS (CON MÁQUINA DE ESTADOS) ---
