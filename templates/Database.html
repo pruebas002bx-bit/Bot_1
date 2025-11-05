@@ -1,0 +1,495 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <title>Base de Datos de Pólizas</title>
+    <link rel="preconnect" href="[https://fonts.googleapis.com](https://fonts.googleapis.com)">
+    <link rel="preconnect" href="[https://fonts.gstatic.com](https://fonts.gstatic.com)" crossorigin>
+    <link href="[https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap](https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap)" rel="stylesheet">
+    <link rel="stylesheet" href="[https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css](https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css)">
+    <style>
+        :root {
+            --card-bg: #ffffff;
+            --text-primary: #111827;
+            --text-secondary: #4B5563;
+            --border-color: #e5e7eb;
+            --shadow-color: rgba(0, 0, 0, 0.05);
+            --accent-color: #2D3748;
+            --accent-hover: #4A5568;
+            --danger-color: #ef4444;
+            --danger-hover: #dc2626;
+            --page-bg: #f8fafc;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: var(--page-bg);
+            padding: 30px;
+        }
+        
+        .db-container {
+            width: 100%;
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+
+        .db-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 25px;
+        }
+        
+        .db-header h1 { 
+            font-size: 2.2em; 
+            font-weight: 700; 
+            color: var(--text-primary); 
+        }
+
+        .search-box {
+            position: relative;
+            width: 350px;
+        }
+        .search-box input {
+            width: 100%;
+            padding: 12px 15px 12px 45px;
+            border: 1px solid var(--border-color);
+            border-radius: 10px;
+            font-size: 1em;
+        }
+        .search-box i {
+            position: absolute;
+            left: 15px;
+            top: 50%;
+            transform: translateY(-50%);
+            color: var(--text-secondary);
+        }
+
+        .db-table-card {
+            background: var(--card-bg);
+            border-radius: 12px;
+            border: 1px solid var(--border-color);
+            box-shadow: 0 4px 12px var(--shadow-color);
+            overflow: hidden; /* Para contener la tabla */
+        }
+        
+        .table-wrapper {
+            overflow-x: auto; /* Permite scroll horizontal en la tabla */
+        }
+
+        .db-table { 
+            width: 100%; 
+            border-collapse: collapse; 
+            table-layout: auto; /* Se ajusta al contenido */
+        }
+        .db-table th, .db-table td { 
+            padding: 14px 18px; 
+            text-align: left; 
+            border-bottom: 1px solid var(--border-color);
+            white-space: nowrap; /* Evita que el texto se rompa */
+        }
+        .db-table th { 
+            font-weight: 600; 
+            font-size: 0.9em;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            color: var(--text-secondary); 
+            background-color: #f9fafb;
+        }
+        .db-table td { 
+            color: var(--text-primary);
+            font-size: 0.95em;
+        }
+        .db-table tr:last-child td { border-bottom: none; }
+        .db-table tr:hover { background-color: #f9fafb; }
+        
+        .db-table td .actions {
+            display: flex;
+            gap: 10px;
+        }
+
+        .btn-action {
+            background: none;
+            border: none;
+            cursor: pointer;
+            font-size: 1.1em;
+            padding: 5px;
+            border-radius: 5px;
+            transition: all 0.2s;
+        }
+        .btn-edit { color: var(--accent-color); }
+        .btn-edit:hover { background-color: #e2e8f0; }
+        .btn-delete { color: var(--danger-color); }
+        .btn-delete:hover { background-color: #fee2e2; }
+
+        .loading-row td, .empty-row td {
+            text-align: center;
+            padding: 40px;
+            color: var(--text-secondary);
+            font-style: italic;
+        }
+
+        /* --- Estilos de la Ventana Modal (copiados de Configuracion.html) --- */
+        .modal-overlay {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0, 0, 0, 0.6);
+            backdrop-filter: blur(8px); display: none; align-items: center; justify-content: center; z-index: 1000; 
+            opacity: 0; transition: opacity 0.3s ease;
+            overflow-y: auto; /* Permite scroll si el modal es muy alto */
+            padding: 20px;
+        }
+        .modal-overlay.show { display: flex; opacity: 1; }
+        .modal-content {
+            background: #fff;
+            border-radius: 16px; padding: 30px; width: 90%; max-width: 800px;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.2); transform: scale(0.95); transition: transform 0.3s ease;
+            margin: auto; /* Centra el modal */
+        }
+        .modal-overlay.show .modal-content { transform: scale(1); }
+        .modal-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 25px; }
+        .modal-header h2 { font-size: 22px; }
+        .close-button { background: none; border: none; font-size: 24px; cursor: pointer; color: var(--text-secondary); }
+        
+        /* Formulario del Modal en 2 columnas */
+        .modal-body form {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+        }
+        .modal-body .form-group {
+            display: flex;
+            flex-direction: column;
+        }
+        .modal-body label { 
+            font-weight: 600; 
+            color: var(--text-secondary);
+            margin-bottom: 8px;
+            font-size: 0.9em;
+        }
+        .modal-body input {
+            width: 100%; padding: 10px; font-size: 1em; border: 1px solid #d1d5db;
+            border-radius: 8px; transition: all 0.2s;
+        }
+        .modal-body input:focus { outline: none; border-color: var(--accent-color); }
+        
+        .modal-footer { display: flex; justify-content: flex-end; gap: 10px; margin-top: 30px; border-top: 1px solid var(--border-color); padding-top: 20px; }
+        .btn { padding: 12px 25px; font-size: 16px; font-weight: 600; border: none; border-radius: 12px; cursor: pointer; transition: all 0.2s; }
+        .btn-secondary { background: #f1f5f9; color: var(--text-secondary); }
+        .btn-primary { background: var(--accent-color); color: white; }
+        .btn-primary:hover { background: var(--accent-hover); }
+        .btn-primary:disabled { background: #9ca3af; cursor: not-allowed; }
+        
+        .toast { position: fixed; bottom: -100px; left: 50%; transform: translateX(-50%); background-color: var(--accent-color); color: white; padding: 15px 25px; border-radius: 12px; box-shadow: 0 5px 15px rgba(0,0,0,0.2); font-weight: 500; z-index: 2000; transition: bottom 0.5s ease; }
+        .toast.show { bottom: 30px; }
+
+    </style>
+</head>
+<body>
+
+    <div class="db-container">
+        <div class="db-header">
+            <h1>Base de Datos de Pólizas</h1>
+            <div class="search-box">
+                <i class="fas fa-search"></i>
+                <input type="text" id="search-input" placeholder="Buscar por Nombre, Cédula o Placa...">
+            </div>
+        </div>
+
+        <div class="db-table-card">
+            <div class="table-wrapper">
+                <table class="db-table">
+                    <thead>
+                        <tr>
+                            <th>Acciones</th>
+                            <th>Aseguradora</th>
+                            <th>Nombres</th>
+                            <th>Cédula/NIT</th>
+                            <th>Tipo</th>
+                            <th>Placa</th>
+                            <th>Modelo</th>
+                            <th>Vlr Póliza</th>
+                            <th>Mes Venc.</th>
+                            <th>Fecha Venc.</th>
+                            <th>Referencia</th>
+                        </tr>
+                    </thead>
+                    <tbody id="database-table-body">
+                        <tr class="loading-row">
+                            <td colspan="11">Cargando datos...</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal-overlay" id="edit-modal-overlay">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>Editar Registro</h2>
+                <button type="button" class="close-button" data-action="close">&times;</button>
+            </div>
+            <div class="modal-body">
+                <form id="edit-form">
+                    <input type="hidden" id="edit-record-id">
+                    
+                    <div class="form-group">
+                        <label for="edit-aseguradora">Aseguradora</label>
+                        <input type="text" id="edit-aseguradora">
+                    </div>
+                    <div class="form-group">
+                        <label for="edit-nombres">Nombres</label>
+                        <input type="text" id="edit-nombres">
+                    </div>
+                    <div class="form-group">
+                        <label for="edit-cedula_nit">Cédula/NIT</label>
+                        <input type="text" id="edit-cedula_nit">
+                    </div>
+                    <div class="form-group">
+                        <label for="edit-tipo">Tipo</label>
+                        <input type="text" id="edit-tipo">
+                    </div>
+                    <div class="form-group">
+                        <label for="edit-placa">Placa</label>
+                        <input type="text" id="edit-placa">
+                    </div>
+                    <div class="form-group">
+                        <label for="edit-modelo">Modelo</label>
+                        <input type="text" id="edit-modelo">
+                    </div>
+                    <div class="form-group">
+                        <label for="edit-valor_poliza">Valor Póliza</label>
+                        <input type="text" id="edit-valor_poliza">
+                    </div>
+                    <div class="form-group">
+                        <label for="edit-mes_vencimiento">Mes Vencimiento</label>
+                        <input type="text" id="edit-mes_vencimiento">
+                    </div>
+                    <div class="form-group">
+                        <label for="edit-fecha_venc">Fecha Vencimiento</label>
+                        <input type="text" id="edit-fecha_venc">
+                    </div>
+                    <div class="form-group">
+                        <label for="edit-referencia">Referencia</label>
+                        <input type="text" id="edit-referencia">
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-action="close">Cancelar</button>
+                <button type="submit" class="btn btn-primary" form="edit-form" id="edit-save-btn">Guardar Cambios</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="toast" id="toastNotification"></div>
+
+    <script>
+    document.addEventListener('DOMContentLoaded', () => {
+        const searchInput = document.getElementById('search-input');
+        const tableBody = document.getElementById('database-table-body');
+        const modalOverlay = document.getElementById('edit-modal-overlay');
+        const editForm = document.getElementById('edit-form');
+        const editSaveBtn = document.getElementById('edit-save-btn');
+        const toastNotification = document.getElementById('toastNotification');
+        
+        let allData = []; // Caché local de los datos
+        let currentEditId = null;
+
+        // --- 1. Toast de Notificación ---
+        const showToast = (message, isError = false) => {
+            toastNotification.textContent = message;
+            if (isError) {
+                toastNotification.style.backgroundColor = 'var(--danger-color)';
+            } else {
+                toastNotification.style.backgroundColor = 'var(--accent-color)';
+            }
+            toastNotification.classList.add('show');
+            setTimeout(() => {
+                toastNotification.classList.remove('show');
+                toastNotification.style.backgroundColor = 'var(--accent-color)';
+            }, 3000); 
+        };
+
+        // --- 2. Renderizar la Tabla ---
+        const renderTable = (data) => {
+            tableBody.innerHTML = ''; // Limpiar
+            if (data.length === 0) {
+                tableBody.innerHTML = `<tr class="empty-row"><td colspan="11">No se encontraron registros.</td></tr>`;
+                return;
+            }
+
+            data.forEach(r => {
+                const row = document.createElement('tr');
+                row.dataset.recordId = r.id;
+                row.innerHTML = `
+                    <td>
+                        <div class="actions">
+                            <button class="btn-action btn-edit" title="Editar"><i class="fas fa-pencil-alt"></i></button>
+                            <button class="btn-action btn-delete" title="Eliminar"><i class="fas fa-trash-alt"></i></button>
+                        </div>
+                    </td>
+                    <td>${r.aseguradora}</td>
+                    <td>${r.nombres}</td>
+                    <td>${r.cedula_nit}</td>
+                    <td>${r.tipo}</td>
+                    <td>${r.placa}</td>
+                    <td>${r.modelo}</td>
+                    <td>${r.valor_poliza}</td>
+                    <td>${r.mes_vencimiento}</td>
+                    <td>${r.fecha_venc}</td>
+                    <td>${r.referencia}</td>
+                `;
+                tableBody.appendChild(row);
+            });
+        };
+
+        // --- 3. Cargar Datos desde la API ---
+        const loadData = async (searchTerm = '') => {
+            try {
+                const response = await fetch(`/api/database_records?search=${encodeURIComponent(searchTerm)}`);
+                if (!response.ok) throw new Error('Error al cargar los datos');
+                allData = await response.json();
+                renderTable(allData);
+            } catch (error) {
+                console.error(error);
+                tableBody.innerHTML = `<tr class="empty-row"><td colspan="11" style="color: red;">Error al cargar datos.</td></tr>`;
+                showToast(error.message, true);
+            }
+        };
+
+        // --- 4. Búsqueda/Filtro ---
+        let searchTimeout;
+        searchInput.addEventListener('input', () => {
+            clearTimeout(searchTimeout);
+            const term = searchInput.value;
+            // Esperar 300ms antes de buscar para no saturar
+            searchTimeout = setTimeout(() => {
+                loadData(term);
+            }, 300);
+        });
+
+        // --- 5. Lógica del Modal (Abrir/Cerrar) ---
+        const openModal = (recordId) => {
+            const record = allData.find(r => r.id === recordId);
+            if (!record) return;
+
+            currentEditId = recordId;
+            document.getElementById('edit-record-id').value = record.id;
+            document.getElementById('edit-aseguradora').value = record.aseguradora;
+            document.getElementById('edit-nombres').value = record.nombres;
+            document.getElementById('edit-cedula_nit').value = record.cedula_nit;
+            document.getElementById('edit-tipo').value = record.tipo;
+            document.getElementById('edit-placa').value = record.placa;
+            document.getElementById('edit-modelo').value = record.modelo;
+            document.getElementById('edit-valor_poliza').value = record.valor_poliza;
+            document.getElementById('edit-mes_vencimiento').value = record.mes_vencimiento;
+            document.getElementById('edit-fecha_venc').value = record.fecha_venc;
+            document.getElementById('edit-referencia').value = record.referencia;
+            
+            modalOverlay.classList.add('show');
+        };
+
+        const closeModal = () => {
+            currentEditId = null;
+            modalOverlay.classList.remove('show');
+            editForm.reset();
+        };
+
+        modalOverlay.addEventListener('click', e => {
+            if (e.target === modalOverlay || e.target.closest('[data-action="close"]')) {
+                closeModal();
+            }
+        });
+
+        // --- 6. Manejadores de Acciones de la Tabla (Editar/Borrar) ---
+        tableBody.addEventListener('click', e => {
+            const editBtn = e.target.closest('.btn-edit');
+            const deleteBtn = e.target.closest('.btn-delete');
+            
+            if (editBtn) {
+                const recordId = parseInt(editBtn.closest('tr').dataset.recordId);
+                openModal(recordId);
+            }
+            
+            if (deleteBtn) {
+                const recordId = parseInt(deleteBtn.closest('tr').dataset.recordId);
+                handleDelete(recordId);
+            }
+        });
+
+        // --- 7. Guardar Edición ---
+        editForm.addEventListener('submit', async e => {
+            e.preventDefault();
+            if (!currentEditId) return;
+
+            const updatedData = {
+                aseguradora: document.getElementById('edit-aseguradora').value,
+                nombres: document.getElementById('edit-nombres').value,
+                cedula_nit: document.getElementById('edit-cedula_nit').value,
+                tipo: document.getElementById('edit-tipo').value,
+                placa: document.getElementById('edit-placa').value,
+                modelo: document.getElementById('edit-modelo').value,
+                valor_poliza: document.getElementById('edit-valor_poliza').value,
+                mes_vencimiento: document.getElementById('edit-mes_vencimiento').value,
+                fecha_venc: document.getElementById('edit-fecha_venc').value,
+                referencia: document.getElementById('edit-referencia').value,
+            };
+
+            editSaveBtn.disabled = true;
+            editSaveBtn.textContent = 'Guardando...';
+
+            try {
+                const response = await fetch(`/api/database_records/${currentEditId}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(updatedData)
+                });
+                const data = await response.json();
+                if (!response.ok) throw new Error(data.error || 'Error al guardar');
+                
+                showToast(data.message || 'Registro actualizado');
+                closeModal();
+                loadData(searchInput.value); // Recargar datos
+            } catch (error) {
+                console.error(error);
+                showToast(error.message, true);
+            } finally {
+                editSaveBtn.disabled = false;
+                editSaveBtn.textContent = 'Guardar Cambios';
+            }
+        });
+
+        // --- 8. Eliminar Registro ---
+        const handleDelete = async (recordId) => {
+            const record = allData.find(r => r.id === recordId);
+            if (!record) return;
+
+            if (confirm(`¿Estás seguro de eliminar el registro de ${record.nombres} (Placa: ${record.placa})?`)) {
+                try {
+                    const response = await fetch(`/api/database_records/${recordId}`, {
+                        method: 'DELETE'
+                    });
+                    const data = await response.json();
+                    if (!response.ok) throw new Error(data.error || 'Error al eliminar');
+                    
+                    showToast(data.message || 'Registro eliminado');
+                    loadData(searchInput.value); // Recargar datos
+                } catch (error) {
+                    console.error(error);
+                    showToast(error.message, true);
+                }
+            }
+        };
+
+        // --- Carga Inicial ---
+        loadData();
+    });
+    </script>
+</body>
+</html>

@@ -6,7 +6,7 @@
     <link rel="preconnect" href="[https://fonts.googleapis.com](https://fonts.googleapis.com)">
     <link rel="preconnect" href="[https://fonts.gstatic.com](https://fonts.gstatic.com)" crossorigin>
     <link href="[https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap](https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap)" rel="stylesheet">
-    <link rel="stylesheet" href="[https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css](https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css)" xintegrity="sha512-SnH5WK+bZxgPHs44uWIX+LLJAJ9/2PkPKZ5QiAj6Ta86w+fsb2TkcmfRyVX3pBnMFcV7oQPJkl9QevSCWr3W6A==" crossorigin="anonymous" referrerpolicy="no-referrer" />
+    <link rel="stylesheet" href="[https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css](https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css)" integrity="sha512-SnH5WK+bZxgPHs44uWIX+LLJAJ9/2PkPKZ5QiAj6Ta86w+fsb2TkcmfRyVX3pBnMFcV7oQPJkl9QevSCWr3W6A==" crossorigin="anonymous" referrerpolicy="no-referrer" />
     <style>
         :root {
             --card-bg: rgba(255, 255, 255, 0.9);
@@ -162,7 +162,7 @@
         .toast { position: fixed; bottom: -100px; left: 50%; transform: translateX(-50%); background-color: var(--accent-color); color: white; padding: 15px 25px; border-radius: 12px; box-shadow: 0 5px 15px rgba(0,0,0,0.2); font-weight: 500; z-index: 2000; transition: bottom 0.5s ease; }
         .toast.show { bottom: 30px; }
 
-        /* --- INICIO DE MODIFICACIÓN: Estilos para Formulario y Tabla --- */
+        /* --- INICIO DE MODIFICACIÓN: Estilos para Formulario --- */
         .form-group {
             margin-bottom: 20px;
         }
@@ -197,37 +197,6 @@
             color: var(--text-secondary);
             margin-top: 5px;
         }
-
-        .imported-table { 
-            width: 100%; 
-            border-collapse: collapse; 
-            margin-top: 15px; 
-            table-layout: fixed; /* Ayuda a que las columnas se comporten */
-        }
-        .imported-table th, .imported-table td { 
-            padding: 12px 15px; 
-            text-align: left; 
-            border-bottom: 1px solid rgba(0,0,0,0.1); 
-            word-wrap: break-word; /* Para números largos */
-        }
-        .imported-table th { font-weight: 600; color: var(--text-secondary); }
-        .imported-table td { color: var(--text-primary); }
-        .imported-table tr:last-child td { border-bottom: none; }
-        .imported-table th:nth-child(1) { width: 50%; } /* Columna de Contacto */
-        .imported-table th:nth-child(2) { width: 25%; } /* Columna de Mensajes */
-        .imported-table th:nth-child(3) { width: 25%; text-align: center; } /* Columna de Acciones */
-        .imported-table td:nth-child(3) { text-align: center; }
-
-        .btn-delete-convo { 
-            background: none; 
-            border: none; 
-            color: #ef4444; 
-            cursor: pointer; 
-            font-size: 1.1em;
-            padding: 5px;
-            transition: color 0.2s;
-        }
-        .btn-delete-convo:hover { color: #dc2626; }
         /* --- FIN DE MODIFICACIÓN --- */
     </style>
 </head>
@@ -239,7 +208,6 @@
                 <p>Gestiona la configuración y el comportamiento de tu asistente virtual.</p>
             </div>
             
-            <!-- Card de Configuración Principal -->
             <div class="config-card">
                 <div class="card-header">
                     <h3>Configuración Principal</h3>
@@ -265,53 +233,29 @@
                 </div>
             </div>
             
-            <!-- --- INICIO DE MODIFICACIÓN: Card de Importar (Campo de Nombre ELIMINADO) --- -->
-            <div class="config-card" id="import-card">
+            <div class="config-card" id="database-upload-card">
                 <div class="card-header" style="border-bottom: none; margin-bottom: 0;">
-                    <h3>Importar Historial de Chat</h3>
+                    <h3>Cargar Base de Datos de Pólizas</h3>
                 </div>
-                <form id="uploadChatForm">
+                <form id="uploadDatabaseForm">
                     <div class="form-group">
-                        <label for="chatPhone">Número del Cliente (Formato Twilio)</label>
-                        <input type="text" id="chatPhone" name="phone" value="whatsapp:+57" placeholder="whatsapp:+573001234567" required>
-                        <p>Debe incluir "whatsapp:" y el código de país.</p>
+                        <label for="databaseFile">Archivo de Base de Datos (.xlsx, .xls)</label>
+                        <input type="file" id="databaseFile" name="file" accept=".xlsx, .xls" required>
+                        <p>
+                            El archivo reemplazará <strong>TODA</strong> la base de datos existente.
+                            <br>
+                            Asegúrate que los encabezados (fila 1) sean: 
+                            <code style="font-size: 0.9em;">ASEGURADORA, NOMBRES, CEDULA/NIT, TIPO, PLACA, MODELO, VLOR POLIZA, MES VENCIMIENTO, FECHA VENC, REFERENCIA</code>
+                        </p>
                     </div>
-                    <div class="form-group">
-                        <label for="chatFile">Archivo de Chat (.txt)</label>
-                        <input type="file" id="chatFile" name="file" accept=".txt" required>
-                        <p>Tu nombre de agente se tomará automáticamente de tu perfil de usuario.</p>
-                    </div>
-                    <!-- El campo de Nombre de Agente ha sido eliminado -->
-                    <button type="submit" class="btn btn-primary" id="uploadSubmitBtn">
-                        <i class="fas fa-upload"></i> Cargar Historial
+                    <button type="submit" class="btn btn-primary" id="uploadDbSubmitBtn">
+                        <i class="fas fa-upload"></i> Cargar Base de Datos
                     </button>
                 </form>
             </div>
-            <!-- --- FIN DE MODIFICACIÓN --- -->
-
-            <!-- Card para Lista de Importados -->
-            <div class="config-card" id="imported-list-card">
-                <div class="card-header" style="padding-bottom: 0; border-bottom: none;">
-                    <h3>Contactos Importados</h3>
-                </div>
-                <table class="imported-table">
-                    <thead>
-                        <tr>
-                            <th>Contacto (Teléfono)</th>
-                            <th>Mensajes</th>
-                            <th>Acciones</th>
-                        </tr>
-                    </thead>
-                    <tbody id="imported-chats-table-body">
-                        <!-- Las filas se cargarán aquí dinámicamente -->
-                    </tbody>
-                </table>
-            </div>
-
-        </main>
+            </main>
     </div>
 
-    <!-- Modal de Edición de Configuración -->
     <div class="modal-overlay" id="modalOverlay">
         <div class="modal-content"><form id="modalForm">
             <div class="modal-header">
@@ -347,7 +291,6 @@
         </form></div>
     </div>
 
-    <!-- Toast de Notificación -->
     <div class="toast" id="toastNotification"></div>
 
     <script>
@@ -449,74 +392,27 @@
                 }
             });
 
-            // --- INICIO DE LÓGICA DE IMPORTACIÓN ---
+            // --- INICIO DE LÓGICA DE CARGA DE BASE DE DATOS ---
+            const uploadDatabaseForm = document.getElementById('uploadDatabaseForm');
+            const uploadDbBtn = document.getElementById('uploadDbSubmitBtn');
+            const databaseFileInput = document.getElementById('databaseFile');
 
-            // --- Formulario de Subida ---
-            const uploadForm = document.getElementById('uploadChatForm');
-            const uploadBtn = document.getElementById('uploadSubmitBtn');
-            const chatPhoneInput = document.getElementById('chatPhone');
-            const chatFileInput = document.getElementById('chatFile');
-            // El input de agentName ya no es necesario aquí
-
-            // --- Tabla de Importados ---
-            const importedChatsTableBody = document.getElementById('imported-chats-table-body');
-
-            // --- 1. Cargar Tabla de Importados ---
-            const loadImportedChats = async () => {
-                try {
-                    const response = await fetch('/api/imported_chats');
-                    if (!response.ok) throw new Error('Error al cargar chats');
-                    const chats = await response.json();
-                    
-                    importedChatsTableBody.innerHTML = ''; // Limpiar tabla
-                    if (chats.length === 0) {
-                         importedChatsTableBody.innerHTML = '<tr><td colspan="3" style="text-align: center; color: var(--text-secondary); padding: 20px;">No hay chats importados.</td></tr>';
-                         return;
-                    }
-
-                    chats.forEach(chat => {
-                        const row = document.createElement('tr');
-                        row.dataset.id = chat.id;
-                        row.innerHTML = `
-                            <td>${chat.phone}</td>
-                            <td>${chat.message_count}</td>
-                            <td style="text-align: center;">
-                                <button class="btn-delete-convo" data-id="${chat.id}" title="Eliminar"><i class="fas fa-trash-alt"></i></button>
-                            </td>
-                        `;
-                        importedChatsTableBody.appendChild(row);
-                    });
-                } catch (error) {
-                    console.error(error);
-                    importedChatsTableBody.innerHTML = '<tr><td colspan="3" style="text-align: center; color: red; padding: 20px;">Error al cargar chats.</td></tr>';
-                }
-            };
-
-            // --- 2. Manejador de Subida de Formulario ---
-            uploadForm.addEventListener('submit', async (e) => {
+            uploadDatabaseForm.addEventListener('submit', async (e) => {
                 e.preventDefault();
                 
-                if (!chatPhoneInput.value || !chatFileInput.files[0]) {
-                    showToast('Por favor, completa el teléfono y el archivo.', true);
+                if (!databaseFileInput.files[0]) {
+                    showToast('Por favor, selecciona un archivo Excel.', true);
                     return;
                 }
                 
-                // Validar que el teléfono comience con "whatsapp:+"
-                if (!chatPhoneInput.value.startsWith('whatsapp:+')) {
-                    showToast('El formato del teléfono debe ser "whatsapp:+57..."', true);
-                    return;
-                }
-
-                uploadBtn.disabled = true;
-                uploadBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Cargando...';
+                uploadDbBtn.disabled = true;
+                uploadDbBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Cargando...';
 
                 const formData = new FormData();
-                formData.append('phone', chatPhoneInput.value);
-                formData.append('file', chatFileInput.files[0]);
-                // Ya no enviamos 'agentName'
+                formData.append('file', databaseFileInput.files[0]);
 
                 try {
-                    const response = await fetch('/api/admin/upload_chats', {
+                    const response = await fetch('/api/admin/upload_database', {
                         method: 'POST',
                         body: formData
                     });
@@ -524,56 +420,24 @@
                     const data = await response.json();
 
                     if (response.ok && data.success) {
-                        showToast(data.message || 'Historial cargado con éxito.');
-                        uploadForm.reset();
-                        chatPhoneInput.value = 'whatsapp:+57'; // Resetear valor por defecto
-                        loadImportedChats(); // Recargar la tabla
+                        showToast(data.message || 'Base de datos cargada con éxito.');
+                        uploadDatabaseForm.reset();
                     } else {
                         throw new Error(data.error || 'Error desconocido al cargar el archivo.');
                     }
                 } catch (error) {
-                    console.error('Error al subir chat:', error);
+                    console.error('Error al subir base de datos:', error);
                     showToast(error.message, true);
                 } finally {
-                    uploadBtn.disabled = false;
-                    uploadBtn.innerHTML = '<i class="fas fa-upload"></i> Cargar Historial';
+                    uploadDbBtn.disabled = false;
+                    uploadDbBtn.innerHTML = '<i class="fas fa-upload"></i> Cargar Base de Datos';
                 }
             });
-
-            // --- 3. Manejador de Eliminación de Contacto ---
-            importedChatsTableBody.addEventListener('click', async (e) => {
-                const deleteButton = e.target.closest('.btn-delete-convo');
-                if (!deleteButton) return;
-
-                const convoId = deleteButton.dataset.id;
-                const row = deleteButton.closest('tr');
-                const phone = row.cells[0].textContent;
-
-                if (confirm(`¿Estás seguro de que quieres eliminar la conversación con ${phone}? Se borrarán ${row.cells[1].textContent} mensajes. Esta acción no se puede deshacer.`)) {
-                    try {
-                        const response = await fetch(`/api/conversations/${convoId}`, {
-                            method: 'DELETE'
-                        });
-                        const data = await response.json();
-                        
-                        if (response.ok && data.success) {
-                            showToast(data.message);
-                            loadImportedChats(); // Recargar la tabla
-                        } else {
-                            throw new Error(data.error || 'Error al eliminar');
-                        }
-                    } catch (error) {
-                         console.error(error);
-                         showToast(error.message, true);
-                    }
-                }
-            });
+            // --- FIN DE LÓGICA DE CARGA DE BASE DE DATOS ---
 
             // --- Carga Inicial ---
             loadConfigData();
-            loadImportedChats();
             
-            // --- FIN DE LÓGICA DE IMPORTACIÓN ---
         });
     </script>
 </body>

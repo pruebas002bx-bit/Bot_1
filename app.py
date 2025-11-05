@@ -2,7 +2,8 @@ import os
 import logging
 import re
 import json
-import requests # <-- Importado
+import requests
+import pandas as pd # <-- NUEVA IMPORTACIÓN
 from flask import Flask, render_template, request, jsonify, redirect, url_for
 from werkzeug.utils import secure_filename 
 from flask_sqlalchemy import SQLAlchemy
@@ -10,7 +11,7 @@ from dotenv import load_dotenv
 from twilio.twiml.messaging_response import MessagingResponse
 from twilio.rest import Client
 from datetime import datetime, timedelta
-from sqlalchemy import func
+from sqlalchemy import func, or_ # <-- NUEVA IMPORTACIÓN
 
 # --- IMPORTACIONES DE SESIONES ---
 from flask_login import LoginManager, UserMixin, login_user, logout_user, login_required, current_user
@@ -105,7 +106,8 @@ class Conversation(db.Model):
     bot_role = db.relationship('BotRole', back_populates='conversations')
     messages = db.relationship('Message', back_populates='conversation', cascade="all, delete-orphan", order_by='Message.timestamp')
     
-    import_source = db.Column(db.String(100), nullable=True, default=None)
+    # --- CAMBIO: 'import_source' ya no se usa, pero se puede mantener si se desea ---
+    import_source = db.Column(db.String(100), nullable=True, default=None) 
     pending_counted = db.Column(db.Boolean, default=False) 
 
     def get_last_message(self):
@@ -121,6 +123,23 @@ class Message(db.Model):
     content = db.Column(db.Text, nullable=False)
     timestamp = db.Column(db.DateTime(timezone=True), server_default=func.now())
     conversation = db.relationship('Conversation', back_populates='messages')
+
+# --- INICIO DE NUEVO MODELO: PolicyData ---
+class PolicyData(db.Model):
+    __tablename__ = 'policy_data'
+    id = db.Column(db.Integer, primary_key=True)
+    aseguradora = db.Column(db.String(255), nullable=True)
+    nombres = db.Column(db.String(255), nullable=True, index=True)
+    cedula_nit = db.Column(db.String(100), nullable=True, index=True)
+    tipo = db.Column(db.String(100), nullable=True)
+    placa = db.Column(db.String(100), nullable=True, index=True)
+    modelo = db.Column(db.String(100), nullable=True)
+    valor_poliza = db.Column(db.String(100), nullable=True)
+    mes_vencimiento = db.Column(db.String(100), nullable=True)
+    fecha_venc = db.Column(db.String(100), nullable=True)
+    referencia = db.Column(db.String(255), nullable=True)
+# --- FIN DE NUEVO MODELO ---
+
 
 # --- RUTAS BÁSICAS (PROTEGIDAS) ---
 @app.route('/')
@@ -144,7 +163,11 @@ def menu_soporte():
 def show_page(page_name):
     if not page_name.endswith('.html'): return "Not Found", 404
     admin_pages = ['Bot.html', 'Usuarios.html', 'Configuracion.html', 'Dashboard.html'] 
-    if current_user.role == 'Soporte' and page_name in admin_pages: return redirect(url_for('menu_soporte'))
+    
+    # --- MODIFICACIÓN: Database.html NO está en admin_pages para que Soporte pueda verlo ---
+    if current_user.role == 'Soporte' and page_name in admin_pages: 
+        return redirect(url_for('menu_soporte'))
+        
     return render_template(page_name, current_user=current_user)
 
 # --- API DE LOGIN Y LOGOUT ---
@@ -799,7 +822,7 @@ def send_chat_message(convo_id):
         # --- REEMPLAZO DE TWILIO ---
         # Hacemos una petición POST al endpoint /send de nuestro bot.js
         
-        send_url = f"{baileys_bot_url}/send"
+        send_url = f"{bailele_bot_url}/send"
         payload = {
             "number": convo.user_phone, # app.py ya lo guarda como 'whatsapp:+...'
             "message": content
@@ -902,51 +925,17 @@ def transfer_chat(convo_id):
         logging.error(f"Error al transferir chat {convo_id}: {e}")
         return jsonify({"error": str(e)}), 500
 
-@app.route('/api/imported_chats', methods=['GET'])
+# --- INICIO DE MODIFICACIÓN: APIs de Importación de Chat ELIMINADAS ---
+# Las rutas /api/imported_chats, /api/conversations/<id> (DELETE) y /api/admin/upload_chats
+# han sido reemplazadas por las nuevas APIs de Base de Datos
+# --- FIN DE MODIFICACIÓN ---
+
+
+# --- INICIO DE NUEVAS APIS: Base de Datos de Pólizas ---
+
+@app.route('/api/admin/upload_database', methods=['POST'])
 @login_required
-def get_imported_chats():
-    admin_check = check_admin()
-    if admin_check: return admin_check
-    
-    try:
-        results = db.session.query(Conversation.id, Conversation.user_phone, func.count(Message.id)) \
-            .outerjoin(Message, Message.conversation_id == Conversation.id) \
-            .filter(Conversation.import_source.isnot(None)) \
-            .group_by(Conversation.id, Conversation.user_phone) \
-            .order_by(Conversation.user_phone).all()
-            
-        chat_list = [{'id': r[0], 'phone': r[1].replace('whatsapp:', ''), 'message_count': r[2]} for r in results]
-        return jsonify(chat_list)
-        
-    except Exception as e:
-        logging.error(f"Error en /api/imported_chats: {e}")
-        return jsonify({"error": str(e)}), 500
-
-@app.route('/api/conversations/<int:convo_id>', methods=['DELETE'])
-@login_required
-def delete_conversation(convo_id):
-    admin_check = check_admin()
-    if admin_check: return admin_check
-
-    try:
-        convo = Conversation.query.get_or_404(convo_id)
-        
-        if convo.import_source is None:
-             return jsonify({"error": "No se puede eliminar un chat que no fue importado."}), 403
-        
-        db.session.delete(convo) 
-        db.session.commit()
-        
-        return jsonify({"success": True, "message": f"Conversación con {convo.user_phone} eliminada."})
-
-    except Exception as e:
-        db.session.rollback()
-        logging.error(f"Error al eliminar conversación {convo_id}: {e}")
-        return jsonify({"error": str(e)}), 500
-
-@app.route('/api/admin/upload_chats', methods=['POST'])
-@login_required
-def upload_chats():
+def upload_database():
     admin_check = check_admin()
     if admin_check: return admin_check
 
@@ -955,142 +944,150 @@ def upload_chats():
             return jsonify({"error": "No se encontró el archivo"}), 400
         
         file = request.files['file']
-        user_phone = request.form.get('phone')
         
-        agent_name = current_user.name 
-
         if not file or file.filename == '':
             return jsonify({"error": "No se seleccionó ningún archivo"}), 400
-        if not user_phone or not user_phone.startswith('whatsapp:'):
-            return jsonify({"error": "El número de teléfono debe estar en formato 'whatsapp:+XXXXXXXXXX'"}), 400
         
-        if not agent_name:
-            logging.error(f"El usuario {current_user.id} ({current_user.username}) no tiene un nombre configurado en el perfil.")
-            return jsonify({"error": "Error: Tu cuenta de usuario no tiene un nombre configurado en el perfil. Contacta al administrador."}), 400
-
-        general_role = BotRole.query.filter_by(title='General').first()
-        if not general_role:
-             general_role = BotRole.query.first()
-             if not general_role:
-                 return jsonify({"error": "No se encontraron roles de bot para asignar el chat importado"}), 500
-
-        convo = Conversation.query.filter_by(user_phone=user_phone).first()
-        if not convo:
-            convo = Conversation(
-                user_phone=user_phone,
-                status='closed', 
-                bot_role_id=general_role.id,
-                import_source='whatsapp_txt_upload'
+        # Asumimos que los encabezados están en la fila 1 (índice 0)
+        # y los datos comienzan en la fila 2 (índice 1)
+        try:
+            df = pd.read_excel(file, header=0, dtype=str).fillna('')
+        except Exception as e:
+            logging.error(f"Error al leer el Excel: {e}")
+            return jsonify({"error": f"Error al procesar el archivo Excel: {e}"}), 400
+            
+        # Nombres de columna esperados (los encabezados en A1, B1, C1...)
+        expected_columns = [
+            'ASEGURADORA', 'NOMBRES', 'CEDULA/NIT', 'TIPO', 'PLACA', 
+            'MODELO', 'VLOR POLIZA', 'MES VENCIMIENTO', 'FECHA VENC', 'REFERENCIA'
+        ]
+        
+        if not all(col in df.columns for col in expected_columns):
+            logging.warning(f"Columnas faltantes. Esperadas: {expected_columns}. Encontradas: {list(df.columns)}")
+            return jsonify({"error": f"El archivo Excel debe tener las columnas exactas: {', '.join(expected_columns)}"}), 400
+            
+        # 1. Borrar todos los datos antiguos
+        PolicyData.query.delete()
+        logging.info("Base de datos de pólizas anterior eliminada.")
+        
+        # 2. Insertar nuevos datos
+        records_added = 0
+        for index, row in df.iterrows():
+            new_record = PolicyData(
+                aseguradora=row['ASEGURADORA'],
+                nombres=row['NOMBRES'],
+                cedula_nit=row['CEDULA/NIT'],
+                tipo=row['TIPO'],
+                placa=row['PLACA'],
+                modelo=row['MODELO'],
+                valor_poliza=row['VLOR POLIZA'],
+                mes_vencimiento=row['MES VENCIMIENTO'],
+                fecha_venc=row['FECHA VENC'],
+                referencia=row['REFERENCIA']
             )
-            db.session.add(convo)
-        else:
-            convo.status = 'closed'
-            convo.import_source = 'whatsapp_txt_upload'
-            Message.query.filter_by(conversation_id=convo.id).delete()
-
-        db.session.flush() 
-
-        content = file.read().decode('utf-8')
-        lines = content.splitlines()
-        
-        msg_start_regex = re.compile(
-            r"(\d{1,2}/\d{1,2}/\d{2}), (\d{1,2}:\d{2} (?:a\. m\.|p\. m\.)) - (.*?): (.*)"
-        )
-        
-        sys_msg_regex = re.compile(
-            r"(\d{1,2}/\d{1,2}/\d{2}), (\d{1,2}:\d{2} (?:a\. m\.|p\. m\.)) - (.*)"
-        )
-
-        messages_added = 0
-        last_message_time = None
-        current_message_data = None 
-
-        def save_buffered_message(buffer):
-            if not buffer:
-                return
-            try:
-                full_content = "\n".join(buffer['content_lines'])
-                if not full_content.strip() or full_content == "<Multimedia omitido>": 
-                    return
-
-                new_msg = Message(
-                    conversation_id=convo.id,
-                    sender_type=buffer['sender_type'],
-                    content=full_content,
-                    timestamp=buffer['timestamp']
-                )
-                db.session.add(new_msg)
-            except Exception as e:
-                logging.error(f"Error guardando mensaje en buffer: {e}")
-
-        for line in lines:
-            line = line.strip()
-            if not line:
-                continue
-            
-            if line.startswith(""):
-                 logging.warning(f"Línea de cifrado ignorada: {line}")
-                 continue
-
-            msg_match = msg_start_regex.match(line)
-            sys_match = sys_msg_regex.match(line) if not msg_match else None
-            
-            if msg_match:
-                save_buffered_message(current_message_data)
-                
-                try:
-                    date_str, time_str, author, msg_content = msg_match.groups()
-                    
-                    time_str = time_str.replace('a. m.', 'AM').replace('p. m.', 'PM')
-                    timestamp_str = f"{date_str} {time_str}"
-                    timestamp = datetime.strptime(timestamp_str, '%d/%m/%y %I:%M %p')
-                except ValueError as e:
-                    logging.warning(f"No se pudo parsear la fecha/hora: '{timestamp_str}'. Línea: {line}. Error: {e}")
-                    continue
-
-                sender_type = 'agent' if author == agent_name else 'user'
-                
-                current_message_data = {
-                    'timestamp': timestamp,
-                    'sender_type': sender_type,
-                    'content_lines': [msg_content]
-                }
-                last_message_time = timestamp
-                messages_added += 1 
-
-            elif sys_match:
-                save_buffered_message(current_message_data)
-                current_message_data = None 
-                
-                msg_content = sys_match.groups()[2]
-                if "cifrados de extremo a extremo" in msg_content or \
-                   "<Multimedia omitido>" in msg_content or \
-                   "creó este grupo" in msg_content or \
-                   "te añadió" in msg_content or \
-                   "Los mensajes y las llamadas están cifrados" in msg_content:
-                    continue
-                
-            elif current_message_data:
-                current_message_data['content_lines'].append(line)
-
-        save_buffered_message(current_message_data)
-        
-        if last_message_time:
-            convo.updated_at = last_message_time
+            db.session.add(new_record)
+            records_added += 1
         
         db.session.commit()
         
-        if messages_added == 0:
-            logging.warning(f"Importación para {user_phone} completada, pero 0 mensajes coincidieron. Verificar Regex y nombre de agente '{agent_name}'.")
-            return jsonify({"error": f"Importación finalizada, pero se añadieron 0 mensajes. Tu nombre de usuario ('{agent_name}') no coincide con ningún autor en el archivo .txt."}), 400
-
-        return jsonify({"success": True, "message": f"Chat importado para {user_phone}. Se añadieron {messages_added} mensajes."})
+        logging.info(f"Base de datos de pólizas cargada. {records_added} registros añadidos.")
+        return jsonify({"success": True, "message": f"Base de datos cargada con éxito. Se añadieron {records_added} registros."})
 
     except Exception as e:
         db.session.rollback()
-        logging.error(f"Error fatal en /api/admin/upload_chats: {e}")
+        logging.error(f"Error fatal en /api/admin/upload_database: {e}")
         logging.exception(e)
+        return jsonify({"error": f"Error interno del servidor: {e}"}), 500
+
+
+@app.route('/api/database_records', methods=['GET'])
+@login_required
+def get_database_records():
+    # Esta ruta es accesible tanto por Admin como por Soporte
+    search_term = request.args.get('search', '').strip()
+    
+    try:
+        query = PolicyData.query
+        
+        if search_term:
+            search_pattern = f"%{search_term}%"
+            query = query.filter(
+                or_(
+                    PolicyData.nombres.ilike(search_pattern),
+                    PolicyData.cedula_nit.ilike(search_pattern),
+                    PolicyData.placa.ilike(search_pattern)
+                )
+            )
+            
+        records = query.order_by(PolicyData.nombres).all()
+        
+        # Convertir objetos a diccionarios
+        results = [
+            {
+                "id": r.id,
+                "aseguradora": r.aseguradora,
+                "nombres": r.nombres,
+                "cedula_nit": r.cedula_nit,
+                "tipo": r.tipo,
+                "placa": r.placa,
+                "modelo": r.modelo,
+                "valor_poliza": r.valor_poliza,
+                "mes_vencimiento": r.mes_vencimiento,
+                "fecha_venc": r.fecha_venc,
+                "referencia": r.referencia
+            } for r in records
+        ]
+        
+        return jsonify(results)
+        
+    except Exception as e:
+        logging.error(f"Error en /api/database_records: {e}")
         return jsonify({"error": str(e)}), 500
+
+@app.route('/api/database_records/<int:id>', methods=['PUT'])
+@login_required
+def update_database_record(id):
+    # Soporte y Admin pueden editar
+    record = PolicyData.query.get_or_404(id)
+    data = request.get_json()
+    
+    try:
+        record.aseguradora = data.get('aseguradora', record.aseguradora)
+        record.nombres = data.get('nombres', record.nombres)
+        record.cedula_nit = data.get('cedula_nit', record.cedula_nit)
+        record.tipo = data.get('tipo', record.tipo)
+        record.placa = data.get('placa', record.placa)
+        record.modelo = data.get('modelo', record.modelo)
+        record.valor_poliza = data.get('valor_poliza', record.valor_poliza)
+        record.mes_vencimiento = data.get('mes_vencimiento', record.mes_vencimiento)
+        record.fecha_venc = data.get('fecha_venc', record.fecha_venc)
+        record.referencia = data.get('referencia', record.referencia)
+        
+        db.session.commit()
+        return jsonify({"success": True, "message": "Registro actualizado."})
+        
+    except Exception as e:
+        db.session.rollback()
+        logging.error(f"Error actualizando registro {id}: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/database_records/<int:id>', methods=['DELETE'])
+@login_required
+def delete_database_record(id):
+    # Soporte y Admin pueden borrar
+    record = PolicyData.query.get_or_404(id)
+    
+    try:
+        db.session.delete(record)
+        db.session.commit()
+        return jsonify({"success": True, "message": "Registro eliminado."})
+        
+    except Exception as e:
+        db.session.rollback()
+        logging.error(f"Error eliminando registro {id}: {e}")
+        return jsonify({"error": str(e)}), 500
+
+# --- FIN DE NUEVAS APIS ---
 
 
 # --- APIs DE DASHBOARD ---
@@ -1170,7 +1167,7 @@ def get_admin_dashboard_data():
 def init_db(app_instance):
     with app_instance.app_context():
         try:
-            db.create_all()
+            db.create_all() # <-- Esto creará la nueva tabla PolicyData
             logging.info("Tablas de la base de datos verificadas/creadas.")
             if not User.query.filter_by(role='Admin').first():
                 logging.info("Creando usuario 'admin' por defecto.")
