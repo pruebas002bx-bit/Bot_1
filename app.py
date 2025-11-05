@@ -422,7 +422,7 @@ def _get_agent_response_and_role(option):
         "3": "Ventas", 
         "4": "Siniestros, Consultas Póliza, Cancelaciones",
         "5": "Siniestros, Consultas Póliza, Cancelaciones",
-        "6": "Siniestros, Consultas Póliza, Cancelaciones", 
+        "6": "Siniestros, Consultas Póliza, Cancelaciones",
         "7": "Soporte Técnico"
     }
     
@@ -451,19 +451,31 @@ def _get_agent_response_and_role(option):
             "_En minutos un agente te estará acompañando 🫡_"
         ]
     elif option == '6':
+        # --- INICIO DE CORRECCIÓN: Respuesta 6 (Cancelación) ---
         response_parts = [
-            "Para ayudarte con tu solicitud de cancelación, por favor confírmanos tu *placa* o *número de póliza* y el *motivo* de la cancelación.",
-            "_En minutos un agente te estará acompañando 🫡_"
+            "Solicitud de cancelación de póliza y reintegro de dinero.📝",
+            "Indícanos por favor la *placa del vehículo* y cuál es el *motivo de cancelación* de la póliza.",
+            "En minutos un agente te estará acompañando en la solicitud 🫡"
         ]
+        # --- FIN DE CORRECCIÓN ---
     elif option == '7':
+        # --- INICIO DE CORRECCIÓN: Respuesta 7 (Quejas y Peticiones) ---
         response_parts = [
-            "Para que un asesor te atienda directamente, por favor indícanos brevemente el *motivo de tu queja o petición*.",
-            "_En minutos un agente te estará acompañando 🫡_"
+            "Comunicarse directamente con asesor por motivo de quejas y peticiones. ☹",
+            "Confírmanos por favor *cómo te podemos colaborar, qué sucedió*, y envíanos el *número de placa*.",
+            "En minutos un agente te estará acompañando en la solicitud."
         ]
+        # --- FIN DE CORRECCIÓN ---
 
     full_response = "\n\n".join(response_parts)
-    return mapeo_roles.get(option, "General"), full_response
+    
+    # Se añade la nota de "escribe A para volver" SOLO para la opción 6
+    # La opción 7 no lo necesita porque es una ruta directa para quejas.
+    if option == '6':
+         full_response += "\n\n*Escribe A para volver al menú principal (si no quieres cancelar).* "
 
+    # Esta línea debe estar al nivel del bloque IF/ELSE (dentro de la función, pero no dentro de un IF)
+    return mapeo_roles.get(option, "General"), full_response
 
 # Función que define la respuesta para las cotizaciones (Sub-Opciones de 2)
 def _get_cotizacion_detail(sub_option):
