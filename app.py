@@ -3,7 +3,7 @@ import logging
 import re
 import json
 import requests
-import pandas as pd # <-- NUEVA IMPORTACIÓN
+import pandas as pd
 from flask import Flask, render_template, request, jsonify, redirect, url_for
 from werkzeug.utils import secure_filename 
 from flask_sqlalchemy import SQLAlchemy
@@ -11,7 +11,7 @@ from dotenv import load_dotenv
 from twilio.twiml.messaging_response import MessagingResponse
 from twilio.rest import Client
 from datetime import datetime, timedelta
-from sqlalchemy import func, or_ # <-- NUEVA IMPORTACIÓN
+from sqlalchemy import func, or_
 
 # --- IMPORTACIONES DE SESIONES ---
 from flask_login import LoginManager, UserMixin, login_user, logout_user, login_required, current_user
@@ -31,7 +31,7 @@ except Exception as e:
     logging.warning(f"No se pudo inicializar el cliente de Twilio: {e}.")
     twilio_client = None
 
-# --- CONFIGURACIÓN DE IA ---
+# --- CONFIGURACIÓN DE IA (Mantenido aunque no se use en el flujo actual) ---
 try:
     import google.generativeai as genai
     genai.configure(api_key=os.getenv('GEMINI_API_KEY'))
@@ -104,10 +104,10 @@ class Conversation(db.Model):
     unread_count = db.Column(db.Integer, default=0)
     bot_role_id = db.Column(db.Integer, db.ForeignKey('bot_roles.id'), nullable=False)
     
-    # --- INDENTACIÓN CRÍTICA ---
+    # --- Nuevas Columnas para el Flujo de Nombre/Celular ---
     user_display_name = db.Column(db.String(120), nullable=True)
     user_reported_phone = db.Column(db.String(50), nullable=True)
-    # --- FIN INDENTACIÓN CRÍTICA ---
+    # --------------------------------------------------------
     
     bot_role = db.relationship('BotRole', back_populates='conversations')
     messages = db.relationship('Message', back_populates='conversation', cascade="all, delete-orphan", order_by='Message.timestamp')
@@ -129,7 +129,7 @@ class Message(db.Model):
     timestamp = db.Column(db.DateTime(timezone=True), server_default=func.now())
     conversation = db.relationship('Conversation', back_populates='messages')
 
-# --- INICIO DE NUEVO MODELO: PolicyData ---
+# --- PolicyData (Base de Datos de Pólizas) ---
 class PolicyData(db.Model):
     __tablename__ = 'policy_data'
     id = db.Column(db.Integer, primary_key=True)
@@ -143,7 +143,7 @@ class PolicyData(db.Model):
     mes_vencimiento = db.Column(db.String(100), nullable=True)
     fecha_venc = db.Column(db.String(100), nullable=True)
     referencia = db.Column(db.String(255), nullable=True)
-# --- FIN DE NUEVO MODELO ---
+# --- FIN DE MODELOS ---
 
 
 # --- RUTAS BÁSICAS (PROTEGIDAS) ---
@@ -169,7 +169,6 @@ def show_page(page_name):
     if not page_name.endswith('.html'): return "Not Found", 404
     admin_pages = ['Bot.html', 'Usuarios.html', 'Configuracion.html', 'Dashboard.html'] 
     
-    # --- MODIFICACIÓN: Database.html NO está en admin_pages para que Soporte pueda verlo ---
     if current_user.role == 'Soporte' and page_name in admin_pages: 
         return redirect(url_for('menu_soporte'))
         
@@ -349,8 +348,6 @@ def update_bot_config():
     return jsonify({'message': 'Configuración del bot actualizada correctamente'})
 
 
-
-
 # --- NUEVA: Función helper para enviar respuestas a Baileys ---
 def send_reply(phone_number, message_content):
     """
@@ -383,6 +380,7 @@ def send_reply(phone_number, message_content):
         return False
 
 
+# --- MÁQUINA DE ESTADOS (Funciones Anidadas) ---
 
 # Función para obtener el menú principal (con formato)
 def _get_main_menu(nombre_usuario):
@@ -658,7 +656,6 @@ def get_ia_response_and_route(convo, message_body):
         db.session.add(convo)
         return ("chat", "Parece que hubo un error. Empecemos de nuevo. ¡Hola! Bienvenido a *VTN SEGUROS*...")
 
-
 # --- WEBHOOK MODIFICADO PARA BAILEYS (CON MÁQUINA DE ESTADOS) ---
 @app.route('/api/baileys/webhook', methods=['POST'])
 def baileys_webhook():
@@ -713,7 +710,7 @@ def baileys_webhook():
                  logging.error("CRÍTICO: No se encontró el rol 'General' para iniciar chats IA.")
                  return jsonify({"error": "Configuración interna del servidor"}), 500
 
-            # --- INICIO DE MODIFICACIÓN: Buscar datos anteriores ---
+            # --- Buscar datos anteriores ---
             previous_data = Conversation.query.filter(
                 Conversation.user_phone == sender_phone,
                 Conversation.user_display_name.isnot(None)
@@ -730,7 +727,6 @@ def baileys_webhook():
             else:
                 # Si no, iniciamos el flujo normal de bienvenida
                 convo.status = 'ia_greeting'
-            # --- FIN DE MODIFICACIÓN ---
 
             db.session.add(convo)
             db.session.flush() # Para obtener el convo.id
@@ -817,6 +813,11 @@ def baileys_webhook():
         db.session.commit()
         return jsonify({"status": "ia_processed"}), 200
 
+    except Exception as e:
+        db.session.rollback()
+        logging.error(f"Error fatal en el webhook de Baileys: {e}")
+        logging.exception(e) 
+        return jsonify({"error": "Error interno del servidor"}), 500
 
 @app.route('/api/chats', methods=['GET'])
 @login_required
