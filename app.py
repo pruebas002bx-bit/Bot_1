@@ -384,114 +384,280 @@ def send_reply(phone_number, message_content):
         return False
 
 
-# --- REESCRITURA TOTAL DE LA FUNCIÓN DE IA ---
+# --- REEMPLAZO COMPLETO PARA get_ia_response_and_route ---
+
+# Función para obtener el menú principal (con formato)
+def _get_main_menu(nombre_usuario):
+    nombre_personalizado = f"¡Hola! *{nombre_usuario}*, " if nombre_usuario else "¡Hola! "
+    return f"""{nombre_personalizado}Bienvenido a *VTN SEGUROS - Grupo Montenegro*. Para nosotros es un gusto atenderte 🫡
+
+Escribe el *número* de tu solicitud:
+
+*1.* Presentas un accidente o requieres asistencia. 🚑
+*2.* Requieres una cotización. 📊
+*3.* Continuar con proceso de compra.💳
+*4.* Inquietudes de tu póliza, certificados, coberturas, pagos y renovaciones.✍🏼
+*5.* Consultar estado de siniestro/Financiaciones y pagos.⏳💰
+*6.* Solicitud de cancelación de póliza y reintegro de dinero.📝
+*7.* Comunicarse directamente con asesor por motivo de quejas y peticiones. ☹
+
+Agradecemos la confianza depositada en nuestra labor."""
+
+# Función para obtener el sub-menú de Cotizaciones
+def _get_cotizaciones_menu():
+    return f"""Escribe el *número* del producto que deseas cotizar: 🔢
+
+*1.* Automóviles, motos, vehículos pesados.
+*2.* Hogar.
+*3.* Empresa.
+*4.* Vida, salud y otros.
+
+*Escribe A para volver al menú principal.*
+"""
+
+# Función que define la respuesta y acción para opciones que enrutan (1, 3, 4, 5, 6, 7)
+def _get_agent_response_and_role(option):
+    mapeo_roles = {
+        "1": "Siniestros, Consultas Póliza, Cancelaciones", 
+        "3": "Ventas", 
+        "4": "Siniestros, Consultas Póliza, Cancelaciones",
+        "5": "Siniestros, Consultas Póliza, Cancelaciones",
+        "6": "Siniestros, Consultas Póliza, Cancelaciones", 
+        "7": "Soporte Técnico"
+    }
+    
+    response_parts = []
+    
+    if option == '1':
+        response_parts = [
+            "*Lamentamos lo sucedido!* Deseamos que te encuentres bien.",
+            "Reúne la evidencia por medio de *fotos*, donde se vean placas, señales de transito y ubicación de los vehículos. 📸",
+            "Si hay un tercero involucrado, comunícate con la aseguradora y solicita asistencia de abogado 💼 y si es necesario, servicio de grúa.",
+            "_Pronto te contactaremos._"
+        ]
+    elif option == '3':
+        response_parts = [
+            "Indícanos qué dudas o inquietudes tienes 🤓.",
+            "_En minutos un agente te estará acompañando 🫡_"
+        ]
+    elif option == '4':
+        response_parts = [
+            "Confírmanos por favor la *placa de tu vehículo* y qué duda o inquietud te podemos aclarar.",
+            "_En minutos un agente te estará acompañando 🫡_"
+        ]
+    elif option == '5':
+        response_parts = [
+            "Confírmanos por favor la *placa de tu vehículo* y qué duda o inquietud te podemos aclarar.",
+            "_En minutos un agente te estará acompañando 🫡_"
+        ]
+    elif option == '6':
+        response_parts = [
+            "Para ayudarte con tu solicitud de cancelación, por favor confírmanos tu *placa* o *número de póliza* y el *motivo* de la cancelación.",
+            "_En minutos un agente te estará acompañando 🫡_"
+        ]
+    elif option == '7':
+        response_parts = [
+            "Para que un asesor te atienda directamente, por favor indícanos brevemente el *motivo de tu queja o petición*.",
+            "_En minutos un agente te estará acompañando 🫡_"
+        ]
+
+    full_response = "\n\n".join(response_parts)
+    return mapeo_roles.get(option, "General"), full_response
+
+
+# Función que define la respuesta para las cotizaciones (Sub-Opciones de 2)
+def _get_cotizacion_detail(sub_option):
+    if sub_option == '1':
+        return (
+            "🚘 Para elaborarte varias propuestas, indícanos por escrito los siguientes datos:\n\n"
+            "🔹*Placa:* (Si es 0km, marca, línea, modelo)\n"
+            "🔹*Nombre propietario:*\n"
+            "🔹*Cédula:*\n"
+            "🔹*Fecha nacimiento:*\n"
+            "🔹*Ciudad residencia:*\n\n"
+            "¿El vehículo tiene prenda?\n"
+            "¿El vehículo es blindado?\n"
+            "Nos indicas por favor cuánto estás pagando de seguro actualmente.\n\n"
+            "_Debido a la alta cantidad de propuestas que estamos elaborando, enviaremos tus propuestas en el transcurso del día siguiente._\n\n"
+            "*Escribe A para volver al menú principal.*"
+        )
+    elif sub_option == '2':
+        return (
+            "Envíanos los siguientes datos para cotizar tú póliza de *Hogar*: 🏡\n\n"
+            "*Dirección y ciudad:*\n"
+            "*Área construida:*\n"
+            "*Año de construcción:*\n"
+            "*Número de pisos* (casa):\n"
+            "*Número de pisos totales edificio* (apartamento):\n\n"
+            "*Nombre propietario:*\n"
+            "*Cédula:*\n\n"
+            "▫*Valor edificación:* $\n"
+            "▫*Valor contenidos muebles:* $\n"
+            "▫*Valor contenidos equipos electrónicos:* $\n"
+            "▫*Valor equipos móviles y portátiles (OPCIONAL):* $\n"
+            "▫*Valor Celulares (OPCIONAL):* $\n"
+            "▫*Valor contenidos joyas (OPCIONAL):* $\n\n"
+            "*Desea asegurar los contenidos por hurto? o solo por daños?*\n\n"
+            "*Escribe A para volver al menú principal.*"
+        )
+    elif sub_option == '3':
+        return (
+            "Envíanos los siguientes datos para cotizar tú seguro *Empresarial*: 🏦\n\n"
+            "*Dirección y ciudad:*\n"
+            "*Razón social:*\n"
+            "*NIT:*\n"
+            "*Detalle de actividad:*\n\n"
+            "*Año de construcción de edificación:*\n"
+            "*Material de construcción:*\n\n"
+            "*Nombre del propietario y cédula:*\n\n"
+            "▫*Edificación:* $ (solo si es propia)\n"
+            "▫*Mejoras locativas:* $\n"
+            "▫*Equipos eléctricos y electrónicos:* $\n"
+            "▫*Equipo Móvil y portátil:* $\n"
+            "▫*Muebles y enseres:* $\n"
+            "▫*Maquinaria y Equipo:* $\n"
+            "▫*Mercancías:* $\n"
+            "▫*Dineros en el local:* $\n\n"
+            "*Escribe A para volver al menú principal.*"
+        )
+    elif sub_option == '4':
+        return (
+            "Para cotizaciones de *Vida, Salud y Otros*:\n\n"
+            "_En minutos un agente te estará acompañando 🫡_\n\n"
+            "*Escribe A para volver al menú principal.*"
+        )
+    return ""
+
 def get_ia_response_and_route(convo, message_body):
     """
     Gestiona la conversación de la IA como una máquina de estados.
     Modifica el objeto 'convo' directamente.
     """
     logging.info(f"IA State Machine: Procesando estado '{convo.status}'")
-    
-    # Mapeo de roles (para el menú final)
-    mapeo_roles = {
-        "1": "Siniestros, Consultas Póliza, Cancelaciones", "2": "Area Cotizaciones", "3": "Ventas",
-        "4": "Renovaciones", "5": "Siniestros, Consultas Póliza, Cancelaciones",
-        "6": "Siniestros, Consultas Póliza, Cancelaciones", "7": "Soporte Técnico"
-    }
-    
-    # Texto del menú (para el final)
-    def get_main_menu(nombre_usuario):
-        nombre_personalizado = f"Hola! {nombre_usuario}, " if nombre_usuario else "Hola! "
-        return f"""{nombre_personalizado}Bienvenido a VTN SEGUROS - Grupo Montenegro. Para nosotros es un gusto atenderte 🫡
-
-Escribe el número de tu solicitud:
-1. Presentas un accidente. 🚑
-2. Requieres una cotización. 📊
-3. Continuar con proceso de compra.💳
-4. Inquietudes de tu póliza, certificados, coberturas, pagos y renovaciones.✍🏼
-5. Consultar estado de siniestro⏳
-6. Solicitud de cancelación de póliza y reintegro de dinero.📝
-7. Comunicarse directamente con asesor por motivo de quejas y peticiones. ☹
-
-Agradecemos la confianza depositada en nuestra labor."""
 
     try:
+        # -----------------------------------------------------
+        # --- LÓGICA DE REGRESO AL MENÚ PRINCIPAL ('A') ---
+        # -----------------------------------------------------
+        # Si no estamos en la fase inicial de captura de datos y el usuario escribe 'A', volvemos al menú.
+        if convo.status.startswith('ia_') and convo.status not in ['ia_greeting', 'ia_ask_name', 'ia_ask_phone', 'ia_confirm_details'] and message_body.strip().upper() == 'A':
+            logging.info(f"Usuario {convo.user_phone} solicitó volver al menú principal desde {convo.status}.")
+            convo.status = 'ia_show_menu' 
+            db.session.add(convo)
+            return ("chat", _get_main_menu(convo.user_display_name))
+
+
+        # -----------------------------------------------------
+        # --- MÁQUINA DE ESTADOS NORMAL ---
+        # -----------------------------------------------------
+
         # --- ESTADO 0: Saludo (Usuario Conocido) ('ia_greeting_known') ---
         if convo.status == 'ia_greeting_known':
-            convo.status = 'ia_show_menu' # Actualizar estado
+            convo.status = 'ia_show_menu' 
             db.session.add(convo)
-            # Saludar y enviar el menú principal personalizado
-            return ("chat", get_main_menu(convo.user_display_name))
+            return ("chat", _get_main_menu(convo.user_display_name))
 
         # --- ESTADO 1: Saludo Inicial ('ia_greeting') ---
         elif convo.status == 'ia_greeting':
-            convo.status = 'ia_ask_name' # Actualizar estado
+            convo.status = 'ia_ask_name' 
             db.session.add(convo)
-            return ("chat", "Hola! Bienvenido a VTN SEGUROS - Grupo Montenegro. Para nosotros es un gusto atenderte. Por favor indícame tu nombre completo.")
-
+            return ("chat", "¡Hola! Bienvenido a *VTN SEGUROS - Grupo Montenegro*. Para nosotros es un gusto atenderte. Por favor indícame tu *nombre completo*.")
+        
         # --- ESTADO 2: Esperando el Nombre ('ia_ask_name') ---
         elif convo.status == 'ia_ask_name':
-            convo.user_display_name = message_body.strip() # Guardar nombre
-            convo.status = 'ia_ask_phone' # Actualizar estado
+            convo.user_display_name = message_body.strip() 
+            convo.status = 'ia_ask_phone' 
             db.session.add(convo)
-            return ("chat", f"Gracias {convo.user_display_name}. Ahora, por favor, indícame tu número de celular.")
+            return ("chat", f"Gracias *{convo.user_display_name}*. Ahora, por favor, indícame tu *número de celular*.")
 
         # --- ESTADO 3: Esperando el Teléfono ('ia_ask_phone') ---
         elif convo.status == 'ia_ask_phone':
-            convo.user_reported_phone = message_body.strip() # Guardar teléfono
-            convo.status = 'ia_confirm_details' # Actualizar estado
+            convo.user_reported_phone = message_body.strip()
+            convo.status = 'ia_confirm_details' 
             db.session.add(convo)
-            return ("chat", f"Tu nombre es {convo.user_display_name} y tu celular es el {convo.user_reported_phone}. ¿Es esto correcto? (Responde 'sí' o 'no')")
+            return ("chat", f"Tu nombre es *{convo.user_display_name}* y tu celular es el *{convo.user_reported_phone}*. ¿Es esto *correcto*? (Responde 'sí' o 'no')")
 
         # --- ESTADO 4: Esperando Confirmación ('ia_confirm_details') ---
         elif convo.status == 'ia_confirm_details':
             respuesta_limpia = message_body.strip().lower()
             
             if respuesta_limpia in ['sí', 'si', 's', 'correcto', 'si es']:
-                convo.status = 'ia_show_menu' # Actualizar estado
+                convo.status = 'ia_show_menu' 
                 db.session.add(convo)
-                # Enviar el menú principal personalizado
-                return ("chat", get_main_menu(convo.user_display_name))
+                return ("chat", _get_main_menu(convo.user_display_name))
             
             elif respuesta_limpia in ['no', 'n', 'incorrecto']:
-                # Reiniciar el proceso
                 convo.status = 'ia_ask_name'
-                convo.user_display_name = None # Borrar datos
-                convo.user_reported_phone = None # Borrar datos
+                convo.user_display_name = None 
+                convo.user_reported_phone = None 
                 db.session.add(convo)
-                return ("chat", "Entendido, empecemos de nuevo. Por favor indícame tu nombre completo.")
+                return ("chat", "Entendido, empecemos de nuevo. Por favor indícame tu *nombre completo*.")
             
             else:
-                # No entendió, repetir la pregunta de confirmación
-                return ("chat", f"No entendí tu respuesta. Por favor, dime 'sí' o 'no'.\n\n¿Tus datos son correctos?\nNombre: {convo.user_display_name}\nCelular: {convo.user_reported_phone}")
+                return ("chat", f"No entendí tu respuesta. Por favor, dime *'sí'* o *'no'*.\n\n¿Tus datos son correctos?\nNombre: *{convo.user_display_name}*\nCelular: *{convo.user_reported_phone}*")
 
         # --- ESTADO 5: Mostrando el Menú (Esperando opción 1-7) ('ia_show_menu') ---
         elif convo.status == 'ia_show_menu':
             opcion = message_body.strip()
             
-            if opcion in mapeo_roles:
-                role_title = mapeo_roles[opcion]
-                # ¡Éxito! Enrutar al agente
-                return ("route", role_title)
+            if opcion == '2':
+                convo.status = 'ia_cotizaciones_sub' # Mover al sub-menú
+                db.session.add(convo)
+                return ("chat", _get_cotizaciones_menu())
+            
+            elif opcion in ['1', '3', '4', '5', '6', '7']:
+                # Opción 1, 3, 4, 5, 6, 7: Enviar mensaje detallado y luego ENRUTAR
+                role, response_msg = _get_agent_response_and_role(opcion)
+                # La acción 'route_and_message' indica a webhook que envíe el mensaje Y ENRUTE.
+                return ("route_and_message", {"role": role, "message": response_msg})
+            
             else:
-                # Opción inválida, repetir el menú
-                return ("chat", f"La opción '{opcion}' no es válida. Por favor, selecciona un número del 1 al 7.\n\n" + get_main_menu(convo.user_display_name))
-        
+                return ("chat", f"La opción *'{opcion}'* no es válida. Por favor, selecciona un número del 1 al 7.\n\n" + _get_main_menu(convo.user_display_name))
+
+        # --- ESTADO 6: Sub-Menú de Cotizaciones ('ia_cotizaciones_sub') ---
+        elif convo.status == 'ia_cotizaciones_sub':
+            sub_opcion = message_body.strip()
+            
+            if sub_opcion == '1':
+                # Autos: Mover a estado de autos y dar respuesta
+                convo.status = 'ia_cotizaciones_autos'
+                db.session.add(convo)
+                return ("chat", _get_cotizacion_detail('1'))
+            elif sub_opcion == '2':
+                # Hogar: Mover a estado de hogar y dar respuesta
+                convo.status = 'ia_cotizaciones_hogar'
+                db.session.add(convo)
+                return ("chat", _get_cotizacion_detail('2'))
+            elif sub_opcion == '3':
+                # Empresa: Mover a estado de empresa y dar respuesta
+                convo.status = 'ia_cotizaciones_empresa'
+                db.session.add(convo)
+                return ("chat", _get_cotizacion_detail('3'))
+            elif sub_opcion == '4':
+                # Vida/Salud/Otros: Dar respuesta y ENRUTAR a agente (Ventas)
+                response_msg = _get_cotizacion_detail('4')
+                return ("route_and_message", {"role": "Ventas", "message": response_msg})
+            else:
+                # Opción inválida, repetir el sub-menú
+                return ("chat", f"La opción *'{sub_opcion}'* no es válida. Por favor, selecciona un número del 1 al 4.\n\n" + _get_cotizaciones_menu())
+
+        # --- ESTADOS FINALES DE COTIZACIÓN (Solo esperan A o enrutan a Area Cotizaciones) ---
+        elif convo.status in ['ia_cotizaciones_autos', 'ia_cotizaciones_hogar', 'ia_cotizaciones_empresa']:
+            # Cualquier otro mensaje en estos estados (que no sea 'A') debe enrutar a un agente de cotizaciones
+            return ("route", "Area Cotizaciones")
+
         # --- ESTADO FALLBACK (Por si acaso) ---
         else:
             convo.status = 'ia_greeting' # Reiniciar
             db.session.add(convo)
-            return ("chat", "Parece que hubo un error. Empecemos de nuevo. Hola! Bienvenido a VTN SEGUROS...")
+            return ("chat", "Parece que hubo un error. Empecemos de nuevo. ¡Hola! Bienvenido a *VTN SEGUROS*...")
 
-    # --- INICIO DE CORRECCIÓN ---
-    # Este bloque 'except' debe estar al mismo nivel de indentación
-    # que el bloque 'try' de arriba.
     except Exception as e:
         logging.error(f"Error en la máquina de estados de IA: {e}")
         # Fallback de seguridad: enrutar a General
         return ("route", "General")
-    # --- FIN DE CORRECCIÓN ---
-# --- FIN DE REESCRITURA ---
+
+
 
 # --- WEBHOOK MODIFICADO PARA BAILEYS (CON MÁQUINA DE ESTADOS) ---
 @app.route('/api/baileys/webhook', methods=['POST'])
@@ -606,6 +772,39 @@ def baileys_webhook():
             ia_msg_db = Message(conversation_id=convo.id, sender_type='system', content=transfer_message)
             db.session.add_all([system_msg_db, ia_msg_db])
             
+        elif action == "route_and_message":
+            # Nuevo tipo de acción: Enviar mensaje detallado Y luego enrutar (Opciones 1, 3, 4, 5, 6, 7 y 2.4)
+            role_title = data['role']
+            full_response = data['message'] # Es la respuesta completa con formato
+            
+            target_role = BotRole.query.filter_by(title=role_title, status='Activo').first()
+
+            # 1. Enviar mensaje detallado al usuario
+            send_reply(sender_phone, full_response)
+            
+            # 2. Guardar el mensaje en la BD
+            ia_msg_db = Message(conversation_id=convo.id, sender_type='system', content=full_response)
+            db.session.add(ia_msg_db)
+            
+            if not target_role:
+                logging.error(f"IA intentó enrutar a '{role_title}' pero no se encontró o está inactivo.")
+                # Si falla el ruteo, no cambiar estado, solo notificar.
+                db.session.commit() 
+                return jsonify({"status": "route_and_message_failed"}), 200
+
+            # 3. Enrutar y cambiar estado a 'open'
+            logging.info(f"IA envió mensaje y enrutó chat {convo.id} a '{target_role.title}'. Cambiando status a 'open'.")
+            convo.status = 'open'
+            convo.bot_role_id = target_role.id
+            convo.pending_counted = True
+            
+            target_role.chats_received = (target_role.chats_received or 0) + 1
+            target_role.chats_pending = (target_role.chats_pending or 0) + 1
+            
+            # 4. Registrar enrutamiento en la BD
+            system_msg_db = Message(conversation_id=convo.id, sender_type='system', content=f"Chat enrutado por IA a {target_role.title}.")
+            db.session.add(system_msg_db)
+
         elif action == "chat":
             # IA Sigue Chateando (ej. "ask phone", "confirm details", "menu")
             ia_response_msg = data
@@ -618,13 +817,6 @@ def baileys_webhook():
         db.session.commit()
         return jsonify({"status": "ia_processed"}), 200
 
-    except Exception as e:
-        db.session.rollback()
-        logging.error(f"Error fatal en el webhook de Baileys: {e}")
-        logging.exception(e) 
-        return jsonify({"error": "Error interno del servidor"}), 500
-
-# --- APIS DE CHAT (PROTEGIDAS Y FILTRADAS) ---
 
 @app.route('/api/chats', methods=['GET'])
 @login_required
