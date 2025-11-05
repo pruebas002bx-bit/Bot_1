@@ -193,7 +193,14 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         filteredChats.forEach(chat => {
-            const { initials, color } = getAvatarDetails(chat.name, chat.id);
+            
+            // --- INICIO DE CORRECCIÓN ---
+            // Limpiamos el 'chat.name' en el frontend para asegurar que solo se muestre el número.
+            // Esto dividirá el JID (ej: "9937...@lid") y tomará solo la parte antes del "@".
+            const displayName = (chat.name || '').split('@')[0].replace('whatsapp:', '').replace('+', '');
+            // --- FIN DE CORRECCIÓN ---
+
+            const { initials, color } = getAvatarDetails(displayName, chat.id); // Usar displayName
             const unreadBadge = chat.unread > 0 ? `<div class="unread-badge">${chat.unread}</div>` : '';
             const chatItem = document.createElement('div');
             chatItem.className = `chat-item ${chat.id === activeChatId ? 'active' : ''}`;
@@ -203,7 +210,7 @@ document.addEventListener('DOMContentLoaded', () => {
             // --- FIN CORRECCIÓN ---
             chatItem.innerHTML = `
                 <div class="avatar" style="background-color: ${color};">${initials}</div>
-                <div class="chat-info"> <div class="name">${chat.name}</div> <div class="last-message">${chat.last_message}</div> </div>
+                <div class="chat-info"> <div class="name">${displayName}</div> <div class="last-message">${chat.last_message}</div> </div>
                 <div class="chat-meta"> <div class="chat-time">${chat.time}</div> ${unreadBadge} </div>`;
             chatListEl.appendChild(chatItem);
         });
