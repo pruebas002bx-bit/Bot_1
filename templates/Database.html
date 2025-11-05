@@ -3,10 +3,10 @@
 <head>
     <meta charset="UTF-8">
     <title>Base de Datos de Pólizas</title>
-    <link rel="preconnect" href="[https://fonts.googleapis.com](https://fonts.googleapis.com)">
-    <link rel="preconnect" href="[https://fonts.gstatic.com](https://fonts.gstatic.com)" crossorigin>
-    <link href="[https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap](https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap)" rel="stylesheet">
-    <link rel="stylesheet" href="[https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css](https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css)">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
     <style>
         :root {
             --card-bg: #ffffff;
@@ -19,6 +19,10 @@
             --danger-color: #ef4444;
             --danger-hover: #dc2626;
             --page-bg: #f8fafc;
+            --blue-hover-bg: #eef2ff;
+            --blue-hover-text: #4f46e5;
+            --red-hover-bg: #fef2f2;
+            --red-hover-text: #ef4444;
         }
 
         * {
@@ -35,7 +39,7 @@
         
         .db-container {
             width: 100%;
-            max-width: 1400px;
+            max-width: 1600px; /* Aumentado para más espacio */
             margin: 0 auto;
         }
 
@@ -63,6 +67,11 @@
             border-radius: 10px;
             font-size: 1em;
         }
+        .search-box input:focus {
+            outline: none;
+            border-color: var(--accent-color);
+            box-shadow: 0 0 0 3px rgba(45, 55, 72, 0.1);
+        }
         .search-box i {
             position: absolute;
             left: 15px;
@@ -86,47 +95,77 @@
         .db-table { 
             width: 100%; 
             border-collapse: collapse; 
-            table-layout: auto; /* Se ajusta al contenido */
+            table-layout: fixed; /* MÁS PROFESIONAL: Evita que la tabla "salte" */
         }
         .db-table th, .db-table td { 
             padding: 14px 18px; 
             text-align: left; 
             border-bottom: 1px solid var(--border-color);
-            white-space: nowrap; /* Evita que el texto se rompa */
         }
         .db-table th { 
             font-weight: 600; 
-            font-size: 0.9em;
+            font-size: 0.85em; /* Más pequeño */
             text-transform: uppercase;
             letter-spacing: 0.5px;
             color: var(--text-secondary); 
             background-color: #f9fafb;
+            white-space: nowrap;
         }
+        
+        /* --- INICIO DE MODIFICACIÓN: Anchos de columna fijos --- */
+        .db-table th:nth-child(1) { width: 100px; text-align: center; } /* Acciones */
+        .db-table th:nth-child(2) { width: 160px; } /* Aseguradora */
+        .db-table th:nth-child(3) { width: 240px; } /* Nombres */
+        .db-table th:nth-child(4) { width: 130px; } /* Cédula/NIT */
+        .db-table th:nth-child(5) { width: 110px; } /* Tipo */
+        .db-table th:nth-child(6) { width: 100px; } /* Placa */
+        .db-table th:nth-child(11) { width: 220px; } /* Referencia */
+        /* --- FIN DE MODIFICACIÓN --- */
+
         .db-table td { 
             color: var(--text-primary);
-            font-size: 0.95em;
+            font-size: 0.9em;
+            vertical-align: top; /* Alinea el texto arriba */
+            white-space: normal; /* PERMITE EL AJUSTE DE LÍNEA */
+            word-break: break-word; /* Rompe palabras largas */
         }
+        
         .db-table tr:last-child td { border-bottom: none; }
-        .db-table tr:hover { background-color: #f9fafb; }
+        .db-table tr:hover { background-color: #f7faff; } /* Hover más sutil */
         
         .db-table td .actions {
             display: flex;
-            gap: 10px;
+            gap: 8px;
+            justify-content: center; /* Centra los botones */
         }
 
+        /* --- INICIO DE MODIFICACIÓN: Estilos de botones profesionales --- */
         .btn-action {
-            background: none;
-            border: none;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            background-color: var(--card-bg);
+            border: 1px solid var(--border-color);
+            color: var(--text-secondary);
             cursor: pointer;
-            font-size: 1.1em;
-            padding: 5px;
-            border-radius: 5px;
-            transition: all 0.2s;
+            width: 34px;  /* Botón cuadrado */
+            height: 34px; /* Botón cuadrado */
+            border-radius: 8px;
+            font-size: 0.9em; /* Tamaño del icono */
+            transition: all 0.2s ease;
         }
-        .btn-edit { color: var(--accent-color); }
-        .btn-edit:hover { background-color: #e2e8f0; }
-        .btn-delete { color: var(--danger-color); }
-        .btn-delete:hover { background-color: #fee2e2; }
+        .btn-edit:hover {
+            background-color: var(--blue-hover-bg);
+            color: var(--blue-hover-text);
+            border-color: #c7d2fe;
+        }
+        .btn-delete:hover {
+            background-color: var(--red-hover-bg);
+            color: var(--red-hover-text);
+            border-color: #fecaca;
+        }
+        /* --- FIN DE MODIFICACIÓN --- */
+
 
         .loading-row td, .empty-row td {
             text-align: center;
@@ -135,7 +174,7 @@
             font-style: italic;
         }
 
-        /* --- Estilos de la Ventana Modal (copiados de Configuracion.html) --- */
+        /* --- Estilos de la Ventana Modal (sin cambios) --- */
         .modal-overlay {
             position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0, 0, 0, 0.6);
             backdrop-filter: blur(8px); display: none; align-items: center; justify-content: center; z-index: 1000; 
@@ -155,7 +194,6 @@
         .modal-header h2 { font-size: 22px; }
         .close-button { background: none; border: none; font-size: 24px; cursor: pointer; color: var(--text-secondary); }
         
-        /* Formulario del Modal en 2 columnas */
         .modal-body form {
             display: grid;
             grid-template-columns: 1fr 1fr;
@@ -327,11 +365,12 @@
             data.forEach(r => {
                 const row = document.createElement('tr');
                 row.dataset.recordId = r.id;
+                // --- INICIO DE MODIFICACIÓN: Iconos corregidos (fa-solid) ---
                 row.innerHTML = `
                     <td>
                         <div class="actions">
-                            <button class="btn-action btn-edit" title="Editar"><i class="fas fa-pencil-alt"></i></button>
-                            <button class="btn-action btn-delete" title="Eliminar"><i class="fas fa-trash-alt"></i></button>
+                            <button class="btn-action btn-edit" title="Editar"><i class="fa-solid fa-pencil"></i></button>
+                            <button class="btn-action btn-delete" title="Eliminar"><i class="fa-solid fa-trash"></i></button>
                         </div>
                     </td>
                     <td>${r.aseguradora}</td>
@@ -345,6 +384,7 @@
                     <td>${r.fecha_venc}</td>
                     <td>${r.referencia}</td>
                 `;
+                // --- FIN DE MODIFICACIÓN ---
                 tableBody.appendChild(row);
             });
         };
