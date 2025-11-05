@@ -2,6 +2,7 @@ import os
 import logging
 import re
 import json
+import requests # <-- MODIFICACIÓN 1: Importado
 from flask import Flask, render_template, request, jsonify, redirect, url_for
 from werkzeug.utils import secure_filename 
 from flask_sqlalchemy import SQLAlchemy
@@ -127,25 +128,25 @@ class Message(db.Model):
 # --- RUTAS BÁSICAS (PROTEGIDAS) ---
 @app.route('/')
 def index():
-    return render_template('Index.html')
+    return render_template('Index.html') #
 
 @app.route('/menu_admin')
 @login_required
 def menu_admin():
     if current_user.role != 'Admin': return redirect(url_for('menu_soporte'))
-    return render_template('Menu.html')
+    return render_template('Menu.html') #
 
 @app.route('/menu_soporte')
 @login_required
 def menu_soporte():
     if current_user.role != 'Soporte': return redirect(url_for('menu_admin'))
-    return render_template('Menu_Soporte.html')
+    return render_template('Menu_Soporte.html') #
 
 @app.route('/page/<path:page_name>')
 @login_required
 def show_page(page_name):
     if not page_name.endswith('.html'): return "Not Found", 404
-    admin_pages = ['Bot.html', 'Usuarios.html', 'Configuracion.html', 'Dashboard.html']
+    admin_pages = ['Bot.html', 'Usuarios.html', 'Configuracion.html', 'Dashboard.html'] #
     if current_user.role == 'Soporte' and page_name in admin_pages: return redirect(url_for('menu_soporte'))
     return render_template(page_name, current_user=current_user)
 
@@ -664,12 +665,14 @@ def get_chat_messages(convo_id):
     messages = [{"sender": msg.sender_type, "text": msg.content} for msg in convo.messages]
     return jsonify(messages)
 
+# --- MODIFICACIÓN 2: FUNCIÓN DE ENVÍO DE MENSAJES (send_chat_message) ---
+# Esta función ahora llama al bot de Baileys (Servicio B) en lugar de Twilio
 @app.route('/api/chats/<int:convo_id>/messages', methods=['POST'])
 @login_required
 def send_chat_message(convo_id):
     convo = Conversation.query.get_or_404(convo_id)
     
-    # Lógica de permisos (se aplica a 'open' y 'closed')
+    # Lógica de permisos
     if current_user.role != 'Admin':
         assigned_role_ids = [role.id for role in current_user.assigned_roles]
         if convo.bot_role_id not in assigned_role_ids:
@@ -678,16 +681,20 @@ def send_chat_message(convo_id):
     data = request.get_json()
     content = data.get('text')
     if not content: return jsonify({"error": "El texto no puede estar vacío"}), 400
-    if not twilio_client or not TWILIO_WHATSAPP_NUMBER:
-        logging.error("Twilio no está configurado para enviar mensajes.")
+
+    # Obtener la URL del bot de Baileys desde las variables de entorno
+    baileys_bot_url = os.getenv('BAILEYS_BOT_URL')
+    if not baileys_bot_url:
+        logging.error("BAILEYS_BOT_URL no está configurada. No se puede enviar mensaje.")
         return jsonify({"error": "El servicio de envío no está configurado"}), 500
+
     try:
         # Reactivar chat si está cerrado
         if convo.status == 'closed':
             logging.info(f"Reactivando chat {convo_id} (estado 'closed') por {current_user.name}.")
             convo.status = 'open'
-            convo.unread_count = 0 # El agente lo está abriendo, no el cliente
-            convo.pending_counted = True # Marcar como pendiente para el rol
+            convo.unread_count = 0 
+            convo.pending_counted = True 
             
             role = convo.bot_role
             if role:
@@ -697,7 +704,22 @@ def send_chat_message(convo_id):
                 role.chats_pending = (role.chats_pending or 0) + 1
                 logging.info(f"Contadores del Rol '{role.title}' actualizados: Pendientes={role.chats_pending}, Resueltos={role.chats_resolved}")
 
-        twilio_client.messages.create(from_=TWILIO_WHATSAPP_NUMBER, body=content, to=convo.user_phone)
+        # --- REEMPLAZO DE TWILIO ---
+        # Hacemos una petición POST al endpoint /send de nuestro bot.js
+        
+        send_url = f"{baileys_bot_url}/send"
+        payload = {
+            "number": convo.user_phone, # app.py ya lo guarda como 'whatsapp:+...'
+            "message": content
+        }
+        
+        # Usamos requests para llamar al otro servicio
+        response = requests.post(send_url, json=payload, timeout=10)
+        
+        # Si el bot de Baileys da error, lo reportamos
+        if response.status_code != 200:
+            raise Exception(f"El bot de Baileys respondió con {response.status_code}: {response.text}")
+        # --- FIN DE REEMPLAZO ---
         
         new_message = Message(conversation_id=convo.id, sender_type='agent', content=content)
         db.session.add(new_message)
@@ -705,10 +727,12 @@ def send_chat_message(convo_id):
         
         db.session.commit()
         return jsonify({"success": True, "message": {"sender": "agent", "text": content}}), 201
+    
     except Exception as e:
-        logging.error(f"Error al enviar mensaje de Twilio o guardar en BD: {e}")
+        logging.error(f"Error al enviar mensaje (vía Baileys) o guardar en BD: {e}")
         db.session.rollback()
         return jsonify({"error": str(e)}), 500
+# --- FIN DE MODIFICACIÓN 2 ---
 
 
 @app.route('/api/chats/<int:convo_id>/resolve', methods=['POST'])
@@ -861,7 +885,7 @@ def upload_chats():
         
         # --- MODIFICACIÓN: El chequeo de agent_name ahora usa el del current_user ---
         if not agent_name:
-            logging.error(f"El usuario {current_user.id} ({current_user.username}) no tiene un nombre configurado.")
+            logging.error(f"El usuario {current_user.id} ({current_user.username}) no tiene un nombre configurado en el perfil.")
             return jsonify({"error": "Error: Tu cuenta de usuario no tiene un nombre configurado en el perfil. Contacta al administrador."}), 400
         # --- FIN DE MODIFICACIÓN ---
 
@@ -934,41 +958,7 @@ def upload_chats():
                 continue
             
             # Ignorar líneas de 'source' o formatos extraños del log proporcionado
-            if line.startswith('[source:') or line.startswith('m. -'):
-                continue
-            
-            user_match = msg_start_regex.match(line)
-            sys_match = sys_msg_regex.match(line)
-
-            if user_match:
-                # Es una nueva línea de mensaje de usuario/agente
-                # 1. Guardar el mensaje anterior que estaba en el buffer
-                save_buffered_message(current_message_data)
-                
-                # 2. Empezar el nuevo mensaje
-                date_str, time_str, author, msg_line_1 = user_match.groups()
-                author = author.strip()
-                
-                try:
-                    # Limpiar hora para strptime (ej: "8:11 p. m." -> "8:11 PM")
-                    time_str_cleaned = time_str.replace('a. m.', 'AM').replace('p. m.', 'PM')
-                    timestamp_str = f"{date_str} {time_str_cleaned}"
-                    # %y para año de 2 dígitos (25), %I para 12 horas, %p para AM/PM
-                    timestamp = datetime.strptime(timestamp_str, '%d/%m/%y %I:%M %p')
-                except ValueError:
-                    try:
-                        # Fallback a formato MM/DD/YY
-                        timestamp = datetime.strptime(timestamp_str, '%m/%d/%y %I:%M %p')
-                    except ValueError:
-                        logging.warning(f"Formato de fecha/hora no reconocido: {timestamp_str}")
-                        continue
-                
-                sender_type = 'agent' if author == agent_name else 'user'
-                
-                current_message_data = {
-                    'timestamp': timestamp,
-                    'sender_type': sender_type,
-                    'content_lines': [msg_line_1.strip()] # Iniciar buffer con la primera línea
+            if line.startswith('# Iniciar buffer con la primera línea
                 }
                 last_message_time = timestamp
                 messages_added += 1 # Contar solo al inicio de un nuevo mensaje
@@ -1134,4 +1124,3 @@ init_db(app)
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
     app.run(host='0.0.0.0', port=port, debug=False)
-
