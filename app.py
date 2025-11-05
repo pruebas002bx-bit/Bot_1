@@ -2,7 +2,7 @@ import os
 import logging
 import re
 import json
-import requests # <-- MODIFICACIÓN 1: Importado
+import requests # <-- Importado
 from flask import Flask, render_template, request, jsonify, redirect, url_for
 from werkzeug.utils import secure_filename 
 from flask_sqlalchemy import SQLAlchemy
@@ -19,13 +19,13 @@ from flask_login import LoginManager, UserMixin, login_user, logout_user, login_
 logging.basicConfig(level=logging.INFO)
 load_dotenv()
 
-# --- CONFIGURACIÓN DE TWILIO ---
+# --- CONFIGURACIÓN DE TWILIO (Se mantiene por si se usa en el futuro, pero no para el webhook) ---
 TWILIO_ACCOUNT_SID = os.getenv('TWILIO_ACCOUNT_SID')
 TWILIO_AUTH_TOKEN = os.getenv('TWILIO_AUTH_TOKEN')
 TWILIO_WHATSAPP_NUMBER = os.getenv('TWILIO_WHATSAPP_NUMBER')
 try:
     twilio_client = Client(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
-    logging.info("Cliente de Twilio inicializado.")
+    logging.info("Cliente de Twilio inicializado (no se usará para webhook de Baileys).")
 except Exception as e:
     logging.warning(f"No se pudo inicializar el cliente de Twilio: {e}.")
     twilio_client = None
@@ -105,14 +105,11 @@ class Conversation(db.Model):
     bot_role = db.relationship('BotRole', back_populates='conversations')
     messages = db.relationship('Message', back_populates='conversation', cascade="all, delete-orphan", order_by='Message.timestamp')
     
-    # Campo para rastrear chats importados
     import_source = db.Column(db.String(100), nullable=True, default=None)
-    
-    pending_counted = db.Column(db.Boolean, default=False) # Flag para saber si ya incrementó/decrementó pending
+    pending_counted = db.Column(db.Boolean, default=False) 
 
     def get_last_message(self):
         if self.messages:
-            # Ordenar por timestamp descendente y tomar el primero si no está pre-ordenado
             return sorted(self.messages, key=lambda m: m.timestamp, reverse=True)[0]
         return None
 
@@ -128,25 +125,25 @@ class Message(db.Model):
 # --- RUTAS BÁSICAS (PROTEGIDAS) ---
 @app.route('/')
 def index():
-    return render_template('Index.html') #
+    return render_template('Index.html') 
 
 @app.route('/menu_admin')
 @login_required
 def menu_admin():
     if current_user.role != 'Admin': return redirect(url_for('menu_soporte'))
-    return render_template('Menu.html') #
+    return render_template('Menu.html') 
 
 @app.route('/menu_soporte')
 @login_required
 def menu_soporte():
     if current_user.role != 'Soporte': return redirect(url_for('menu_admin'))
-    return render_template('Menu_Soporte.html') #
+    return render_template('Menu_Soporte.html') 
 
 @app.route('/page/<path:page_name>')
 @login_required
 def show_page(page_name):
     if not page_name.endswith('.html'): return "Not Found", 404
-    admin_pages = ['Bot.html', 'Usuarios.html', 'Configuracion.html', 'Dashboard.html'] #
+    admin_pages = ['Bot.html', 'Usuarios.html', 'Configuracion.html', 'Dashboard.html'] 
     if current_user.role == 'Soporte' and page_name in admin_pages: return redirect(url_for('menu_soporte'))
     return render_template(page_name, current_user=current_user)
 
@@ -185,7 +182,6 @@ def add_user():
     admin_check = check_admin()
     if admin_check: return admin_check
     data = request.get_json()
-    # Generar username automáticamente si no se provee
     base_username = re.sub(r'\s+', '', data.get('name', 'usuario')).split(' ')[0].lower().strip()
     if not base_username: base_username = 'usuario'
     username = base_username
@@ -324,11 +320,41 @@ def update_bot_config():
     db.session.commit()
     return jsonify({'message': 'Configuración del bot actualizada correctamente'})
 
-# --- LÓGICA DEL WEBHOOK (PÚBLICO) ---
-def create_twilio_response(message_text):
-    response = MessagingResponse()
-    response.message(message_text)
-    return str(response)
+# --- LÓGICA DEL WEBHOOK (MODIFICADA PARA BAILEYS) ---
+
+# --- NUEVA: Función helper para enviar respuestas a Baileys ---
+def send_reply(phone_number, message_content):
+    """
+    Envía un mensaje de respuesta al bot de Baileys (Servicio B).
+    """
+    baileys_bot_url = os.getenv('BAILEYS_BOT_URL')
+    if not baileys_bot_url:
+        logging.error("BAILEYS_BOT_URL no está configurada. No se puede enviar respuesta.")
+        return False
+
+    # El endpoint que creamos en bot.js
+    send_url = f"{baileys_bot_url}/send"
+    payload = {
+        "number": phone_number, # app.py ya lo guarda como 'whatsapp:+...'
+        "message": message_content
+    }
+    
+    try:
+        logging.info(f"Enviando respuesta a Baileys: {send_url} (Para: {phone_number})")
+        response = requests.post(send_url, json=payload, timeout=10)
+        
+        if response.status_code != 200:
+            logging.error(f"El bot de Baileys respondió con {response.status_code}: {response.text}")
+            return False
+        
+        logging.info(f"Respuesta enviada exitosamente a Baileys.")
+        return True
+        
+    except Exception as e:
+        logging.error(f"Error al llamar al bot de Baileys: {e}")
+        return False
+
+# --- Función create_twilio_response ELIMINADA ---
 
 def get_ia_response_and_route(messages_list):
     """
@@ -338,11 +364,9 @@ def get_ia_response_and_route(messages_list):
     logging.info("Iniciando IA conversacional (get_ia_response_and_route)...")
     if not genai:
         logging.error("Módulo de IA (Gemini) no está configurado.")
-        # Fallback: enrutar directamente a 'General' si la IA falla
         return ("route", "General") 
 
     try:
-        # Obtener roles (excluyendo 'General' ya que es el enrutador)
         all_roles = BotRole.query.filter(BotRole.status == 'Activo', BotRole.title != 'General').all()
         if not all_roles:
             logging.error("No hay roles (aparte de 'General') activos en la BD para enrutar.")
@@ -375,28 +399,23 @@ def get_ia_response_and_route(messages_list):
         Historial de Conversación (último mensaje es del usuario):
         """
 
-        # Formatear el historial para el prompt
         chat_history_for_prompt = []
         for msg in messages_list:
             if msg.sender_type == 'user':
-                # Usar 'Usuario' para el prompt
                 chat_history_for_prompt.append(f"Usuario: {msg.content}")
             elif msg.sender_type == 'system':
-                # Usar 'Montenegro' para los mensajes del bot en el prompt
                 chat_history_for_prompt.append(f"Montenegro: {msg.content}")
         
         final_prompt = system_prompt + "\n".join(chat_history_for_prompt)
 
         logging.info(f"Enviando prompt a Gemini 2.5-flash...")
-        model = genai.GenerativeModel('gemini-2.5-flash') # Usando el modelo solicitado
+        model = genai.GenerativeModel('gemini-2.5-flash')
         response = model.generate_content(final_prompt)
         
         response_text = response.text.strip()
         logging.info(f"Respuesta de Gemini: {response_text}")
 
-        # Intentar parsear JSON
         try:
-            # Limpiar si Gemini añade '```json\n...\n```'
             if response_text.startswith("```json"):
                 response_text = re.sub(r"```json\n(.*?)\n```", r"\1", response_text, flags=re.DOTALL)
             
@@ -432,14 +451,19 @@ def get_ia_response_and_route(messages_list):
         logging.error(f"Error en la llamada a la API de Gemini: {e}")
         return ("chat", "Estoy teniendo problemas técnicos. Por favor, espera un momento.")
 
-@app.route('/api/whatsapp/webhook', methods=['POST'])
-def whatsapp_webhook():
-    message_body = request.form.get('Body')
-    sender_phone = request.form.get('From')
+# --- WEBHOOK MODIFICADO PARA BAILEYS ---
+@app.route('/api/baileys/webhook', methods=['POST'])
+def baileys_webhook():
+    # Leer desde JSON, no desde Form
+    data = request.json
+    message_body = data.get('Body')
+    sender_phone = data.get('From')
+    
     if not message_body or not sender_phone:
-        logging.warning("Webhook recibido sin 'Body' o 'From'.")
-        return ('', 400)
-    logging.info(f"Mensaje recibido de {sender_phone}: {message_body}")
+        logging.warning("Webhook (Baileys) recibido sin 'Body' o 'From'.")
+        return jsonify({"error": "Faltan 'Body' o 'From'"}), 400
+        
+    logging.info(f"Mensaje (Baileys) recibido de {sender_phone}: {message_body}")
 
     try:
         # Buscar la conversación más reciente con este número
@@ -457,26 +481,23 @@ def whatsapp_webhook():
                 role.chats_pending = (role.chats_pending or 0) + 1
                 existing_convo.pending_counted = True
             db.session.commit()
-            return ('', 200) # Twilio recibe 200 OK, no envía respuesta
+            # Devolver JSON OK (no TwiML)
+            return jsonify({"status": "message_queued"}), 200
 
         bot_config = BotConfig.query.first()
         if not bot_config or not bot_config.is_active:
             logging.info("Bot inactivo. Ignorando mensaje.")
-            return ('', 200)
+            return jsonify({"status": "bot_inactive"}), 200
 
         # Escenario B: Chat en fase de saludo/IA ('ia_greeting')
         if existing_convo and existing_convo.status == 'ia_greeting':
             logging.info(f"Continuando chat IA (ID: {existing_convo.id}) para {sender_phone}.")
             convo = existing_convo
-            # Añadir mensaje del usuario a la BD
             user_msg = Message(conversation_id=convo.id, sender_type='user', content=message_body)
             db.session.add(user_msg)
             
-            # Obtener historial para la IA (incluyendo el nuevo mensaje)
-            # Recargamos convo.messages para incluir el que acabamos de añadir
             messages_history = Message.query.filter_by(conversation_id=convo.id).order_by(Message.timestamp).all()
             
-            # Llamar a la IA
             action, data = get_ia_response_and_route(messages_history)
             
             if action == "route":
@@ -486,11 +507,12 @@ def whatsapp_webhook():
                 if not target_role:
                     logging.error(f"IA enrutó a '{role_title}' pero no se encontró o está inactivo.")
                     ia_response_msg = f"Ups, el departamento de '{role_title}' no está disponible en este momento. ¿Puedo ayudarte con algo más?"
-                    response_twiml = create_twilio_response(ia_response_msg)
+                    # Enviar respuesta usando el helper
+                    send_reply(sender_phone, ia_response_msg)
                     ia_msg_db = Message(conversation_id=convo.id, sender_type='system', content=ia_response_msg)
                     db.session.add(ia_msg_db)
                     db.session.commit()
-                    return str(response_twiml), 200, {'Content-Type': 'application/xml'}
+                    return jsonify({"status": "route_failed"}), 200
                 
                 # --- Enrutamiento Exitoso ---
                 logging.info(f"IA enrutó chat {convo.id} a '{target_role.title}'. Cambiando status a 'open'.")
@@ -503,26 +525,26 @@ def whatsapp_webhook():
                 target_role.chats_pending = (target_role.chats_pending or 0) + 1
 
                 transfer_message = f"¡Entendido! Un agente del área de {target_role.title} te atenderá pronto."
-                response_twiml = create_twilio_response(transfer_message)
+                # Enviar respuesta usando el helper
+                send_reply(sender_phone, transfer_message)
                 
-                # Mensaje de sistema (para el agente)
                 system_msg_db = Message(conversation_id=convo.id, sender_type='system', content=f"Chat enrutado por IA a {target_role.title}.")
-                # Mensaje de IA (para el usuario, guardado como 'system' para el historial del agente)
                 ia_msg_db = Message(conversation_id=convo.id, sender_type='system', content=transfer_message)
                 db.session.add_all([system_msg_db, ia_msg_db])
                 db.session.commit()
                 
-                return str(response_twiml), 200, {'Content-Type': 'application/xml'}
+                return jsonify({"status": "routed_successfully"}), 200
 
             elif action == "chat":
                 # --- IA Sigue Chateando ---
                 ia_response_msg = data
-                response_twiml = create_twilio_response(ia_response_msg)
-                ia_msg_db = Message(conversation_id=convo.id, sender_type='system', content=ia_response_msg) # Guardado como 'system'
+                # Enviar respuesta usando el helper
+                send_reply(sender_phone, ia_response_msg)
+                ia_msg_db = Message(conversation_id=convo.id, sender_type='system', content=ia_response_msg)
                 db.session.add(ia_msg_db)
                 convo.updated_at = datetime.utcnow()
                 db.session.commit()
-                return str(response_twiml), 200, {'Content-Type': 'application/xml'}
+                return jsonify({"status": "chat_reply_sent"}), 200
         
         # Escenario C: Conversación nueva (o 'closed')
         logging.info(f"No hay conversación activa para {sender_phone}. Creando nueva conversación IA.")
@@ -530,7 +552,7 @@ def whatsapp_webhook():
         general_role = BotRole.query.filter_by(title='General').first()
         if not general_role:
              logging.error("CRÍTICO: No se encontró el rol 'General' para iniciar chats IA.")
-             return ('Error interno del servidor', 500)
+             return jsonify({"error": "Configuración interna del servidor"}), 500
 
         convo = Conversation(user_phone=sender_phone, bot_role_id=general_role.id, status='ia_greeting')
         db.session.add(convo)
@@ -539,7 +561,6 @@ def whatsapp_webhook():
         user_msg = Message(conversation_id=convo.id, sender_type='user', content=message_body)
         db.session.add(user_msg)
         
-        # Llamar a la IA solo con el primer mensaje
         action, data = get_ia_response_and_route([user_msg])
 
         if action == "route": # Improbable en el primer mensaje, pero posible
@@ -554,32 +575,33 @@ def whatsapp_webhook():
                 target_role.chats_pending = (target_role.chats_pending or 0) + 1
                 
                 transfer_message = f"¡Entendido! Un agente del área de {target_role.title} te atenderá pronto."
-                response_twiml = create_twilio_response(transfer_message)
+                # Enviar respuesta usando el helper
+                send_reply(sender_phone, transfer_message)
                 
                 system_msg_db = Message(conversation_id=convo.id, sender_type='system', content=f"Chat enrutado por IA a {target_role.title}.")
                 ia_msg_db = Message(conversation_id=convo.id, sender_type='system', content=transfer_message)
                 db.session.add_all([system_msg_db, ia_msg_db])
             else:
-                # Fallback si el rol no existe
                 action = "chat"
                 data = "¡Hola! Soy Montenegro, tu asistente virtual de Seguros Montenegro. ¿En qué puedo ayudarte hoy?"
         
         if action == "chat":
             ia_response_msg = data
-            response_twiml = create_twilio_response(ia_response_msg)
+            # Enviar respuesta usando el helper
+            send_reply(sender_phone, ia_response_msg)
             ia_msg_db = Message(conversation_id=convo.id, sender_type='system', content=ia_response_msg)
             db.session.add(ia_msg_db)
         
         convo.updated_at = datetime.utcnow()
         db.session.commit()
-        return str(response_twiml), 200, {'Content-Type': 'application/xml'}
+        return jsonify({"status": "new_convo_reply_sent"}), 200
 
     except Exception as e:
         db.session.rollback()
-        logging.error(f"Error fatal en el webhook de WhatsApp: {e}")
-        logging.exception(e) # Imprime el stack trace
-        return ('Error interno del servidor', 500)
-# --- FIN CORRECCIÓN: Webhook ---
+        logging.error(f"Error fatal en el webhook de Baileys: {e}")
+        logging.exception(e) 
+        return jsonify({"error": "Error interno del servidor"}), 500
+# --- FIN DE MODIFICACIÓN: Webhook ---
 
 
 # --- APIS DE CHAT (PROTEGIDAS Y FILTRADAS) ---
@@ -588,20 +610,17 @@ def whatsapp_webhook():
 @login_required
 def get_chats():
     try:
-        # Leer el estado deseado desde los query params, por defecto 'open'
         chat_status = request.args.get('status', 'open') 
         if chat_status not in ['open', 'closed']:
             chat_status = 'open'
 
         conversations_query = None
         if current_user.role == 'Admin':
-            # Admin ve todos los chats del estado solicitado
             conversations_query = Conversation.query.filter_by(status=chat_status).options(
                 db.joinedload(Conversation.messages),
                 db.joinedload(Conversation.bot_role)
             )
         else:
-            # Soporte ve solo chats del estado solicitado de sus roles asignados
             assigned_role_ids = [role.id for role in current_user.assigned_roles]
             if assigned_role_ids:
                 conversations_query = Conversation.query.filter(
@@ -613,9 +632,8 @@ def get_chats():
                 )
             else:
                 logging.info(f"Usuario {current_user.username} (Soporte) no tiene roles asignados.")
-                return jsonify([]) # Devolver lista vacía
+                return jsonify([]) 
 
-        # Asegurarse de que la query no sea None antes de continuar
         if conversations_query is None:
              return jsonify([])
 
@@ -649,11 +667,9 @@ def get_chat_messages(convo_id):
         if convo.bot_role_id not in assigned_role_ids:
             return jsonify({"error": "No autorizado para ver este chat"}), 403
             
-    # Marcar como leído (solo si está 'open' y tiene no leídos)
     if convo.status == 'open' and convo.unread_count > 0:
         convo.unread_count = 0
     
-    # Decrementar 'pendientes' si se abre por primera vez (solo si está 'open')
     if convo.status == 'open' and convo.pending_counted:
         role = convo.bot_role
         if role and role.chats_pending > 0:
@@ -665,14 +681,13 @@ def get_chat_messages(convo_id):
     messages = [{"sender": msg.sender_type, "text": msg.content} for msg in convo.messages]
     return jsonify(messages)
 
-# --- MODIFICACIÓN 2: FUNCIÓN DE ENVÍO DE MENSAJES (send_chat_message) ---
-# Esta función ahora llama al bot de Baileys (Servicio B) en lugar de Twilio
+# --- FUNCIÓN DE ENVÍO DE MENSAJES (Agente Humano) ---
+# (Esta función ya era correcta para la arquitectura de Baileys)
 @app.route('/api/chats/<int:convo_id>/messages', methods=['POST'])
 @login_required
 def send_chat_message(convo_id):
     convo = Conversation.query.get_or_404(convo_id)
     
-    # Lógica de permisos
     if current_user.role != 'Admin':
         assigned_role_ids = [role.id for role in current_user.assigned_roles]
         if convo.bot_role_id not in assigned_role_ids:
@@ -682,14 +697,12 @@ def send_chat_message(convo_id):
     content = data.get('text')
     if not content: return jsonify({"error": "El texto no puede estar vacío"}), 400
 
-    # Obtener la URL del bot de Baileys desde las variables de entorno
     baileys_bot_url = os.getenv('BAILEYS_BOT_URL')
     if not baileys_bot_url:
         logging.error("BAILEYS_BOT_URL no está configurada. No se puede enviar mensaje.")
         return jsonify({"error": "El servicio de envío no está configurado"}), 500
 
     try:
-        # Reactivar chat si está cerrado
         if convo.status == 'closed':
             logging.info(f"Reactivando chat {convo_id} (estado 'closed') por {current_user.name}.")
             convo.status = 'open'
@@ -698,25 +711,20 @@ def send_chat_message(convo_id):
             
             role = convo.bot_role
             if role:
-                # Revertir contadores
                 if role.chats_resolved and role.chats_resolved > 0:
                     role.chats_resolved = role.chats_resolved - 1
                 role.chats_pending = (role.chats_pending or 0) + 1
                 logging.info(f"Contadores del Rol '{role.title}' actualizados: Pendientes={role.chats_pending}, Resueltos={role.chats_resolved}")
 
-        # --- REEMPLAZO DE TWILIO ---
-        # Hacemos una petición POST al endpoint /send de nuestro bot.js
-        
+        # --- REEMPLAZO DE TWILIO (YA ESTABA HECHO) ---
         send_url = f"{baileys_bot_url}/send"
         payload = {
-            "number": convo.user_phone, # app.py ya lo guarda como 'whatsapp:+...'
+            "number": convo.user_phone, 
             "message": content
         }
         
-        # Usamos requests para llamar al otro servicio
         response = requests.post(send_url, json=payload, timeout=10)
         
-        # Si el bot de Baileys da error, lo reportamos
         if response.status_code != 200:
             raise Exception(f"El bot de Baileys respondió con {response.status_code}: {response.text}")
         # --- FIN DE REEMPLAZO ---
@@ -732,7 +740,7 @@ def send_chat_message(convo_id):
         logging.error(f"Error al enviar mensaje (vía Baileys) o guardar en BD: {e}")
         db.session.rollback()
         return jsonify({"error": str(e)}), 500
-# --- FIN DE MODIFICACIÓN 2 ---
+# --- FIN DE FUNCIÓN DE ENVÍO DE AGENTE ---
 
 
 @app.route('/api/chats/<int:convo_id>/resolve', methods=['POST'])
@@ -783,19 +791,15 @@ def transfer_chat(convo_id):
         if original_role and original_role.id == target_role.id:
             return jsonify({"error": "No se puede transferir al mismo rol"}), 400
 
-        # Ajustar contadores
         if original_role:
-            # Decrementar pendiente del rol original SOLO si estaba contado
             if convo.pending_counted and original_role.chats_pending > 0:
                 original_role.chats_pending = original_role.chats_pending - 1
         
-        # Incrementar pendiente del nuevo rol
         target_role.chats_pending = (target_role.chats_pending or 0) + 1
         
-        # Actualizar la conversación
         convo.bot_role_id = target_role.id
-        convo.pending_counted = True # Marcar como pendiente para el nuevo rol
-        convo.updated_at = datetime.utcnow() # Actualizar timestamp
+        convo.pending_counted = True 
+        convo.updated_at = datetime.utcnow() 
         
         system_message = Message(
             conversation_id=convo.id,
@@ -821,8 +825,6 @@ def get_imported_chats():
     if admin_check: return admin_check
     
     try:
-        # Query para obtener conversaciones importadas y contar sus mensajes
-        # Usar outerjoin para incluir chats con 0 mensajes
         results = db.session.query(Conversation.id, Conversation.user_phone, func.count(Message.id)) \
             .outerjoin(Message, Message.conversation_id == Conversation.id) \
             .filter(Conversation.import_source.isnot(None)) \
@@ -845,11 +847,10 @@ def delete_conversation(convo_id):
     try:
         convo = Conversation.query.get_or_404(convo_id)
         
-        # Opcional: Doble chequeo para seguridad
         if convo.import_source is None:
              return jsonify({"error": "No se puede eliminar un chat que no fue importado."}), 403
         
-        db.session.delete(convo) # Esto eliminará la conversación y todos sus mensajes (por cascade)
+        db.session.delete(convo) 
         db.session.commit()
         
         return jsonify({"success": True, "message": f"Conversación con {convo.user_phone} eliminada."})
@@ -859,7 +860,6 @@ def delete_conversation(convo_id):
         logging.error(f"Error al eliminar conversación {convo_id}: {e}")
         return jsonify({"error": str(e)}), 500
 
-# --- INICIO DE MODIFICACIÓN: /api/admin/upload_chats (Parser robusto y Agente Automático) ---
 @app.route('/api/admin/upload_chats', methods=['POST'])
 @login_required
 def upload_chats():
@@ -873,73 +873,60 @@ def upload_chats():
         file = request.files['file']
         user_phone = request.form.get('phone')
         
-        # --- INICIO DE NUEVA LÓGICA ---
-        # Obtener el nombre del agente automáticamente del usuario logueado
         agent_name = current_user.name 
-        # --- FIN DE NUEVA LÓGICA ---
 
         if not file or file.filename == '':
             return jsonify({"error": "No se seleccionó ningún archivo"}), 400
         if not user_phone or not user_phone.startswith('whatsapp:'):
             return jsonify({"error": "El número de teléfono debe estar en formato 'whatsapp:+XXXXXXXXXX'"}), 400
         
-        # --- MODIFICACIÓN: El chequeo de agent_name ahora usa el del current_user ---
         if not agent_name:
             logging.error(f"El usuario {current_user.id} ({current_user.username}) no tiene un nombre configurado en el perfil.")
             return jsonify({"error": "Error: Tu cuenta de usuario no tiene un nombre configurado en el perfil. Contacta al administrador."}), 400
-        # --- FIN DE MODIFICACIÓN ---
 
-        # Buscar el rol "General" para asignarlo
         general_role = BotRole.query.filter_by(title='General').first()
         if not general_role:
              general_role = BotRole.query.first()
              if not general_role:
                  return jsonify({"error": "No se encontraron roles de bot para asignar el chat importado"}), 500
 
-        # Crear o buscar la conversación
         convo = Conversation.query.filter_by(user_phone=user_phone).first()
         if not convo:
             convo = Conversation(
                 user_phone=user_phone,
-                status='closed', # Importar como cerrado por defecto
+                status='closed', 
                 bot_role_id=general_role.id,
                 import_source='whatsapp_txt_upload'
             )
             db.session.add(convo)
         else:
-            # Si ya existe, actualizamos metadatos y borramos mensajes antiguos
             convo.status = 'closed'
             convo.import_source = 'whatsapp_txt_upload'
             Message.query.filter_by(conversation_id=convo.id).delete()
 
-        db.session.flush() # Para obtener el convo.id
+        db.session.flush() 
 
         content = file.read().decode('utf-8')
         lines = content.splitlines()
         
-        # Regex for the START of a new message
-        # Formato: 27/08/25, 8:11 p. m. - Autor: Mensaje
         msg_start_regex = re.compile(
             r"(\d{1,2}/\d{1,2}/\d{2}), (\d{1,2}:\d{2} (?:a\. m\.|p\. m\.)) - (.*?): (.*)"
         )
         
-        # Regex for system messages (no author)
-        # Formato: 27/08/25, 8:11 p. m. - Mensaje del sistema
         sys_msg_regex = re.compile(
             r"(\d{1,2}/\d{1,2}/\d{2}), (\d{1,2}:\d{2} (?:a\. m\.|p\. m\.)) - (.*)"
         )
 
         messages_added = 0
         last_message_time = None
-        current_message_data = None # Almacena: {'timestamp': dt, 'sender_type': str, 'content_lines': []}
+        current_message_data = None 
 
         def save_buffered_message(buffer):
-            """ Función interna para guardar el mensaje en buffer a la BD. """
             if not buffer:
                 return
             try:
                 full_content = "\n".join(buffer['content_lines'])
-                if not full_content.strip() or full_content == "<Multimedia omitido>": # No guardar mensajes vacíos o multimedia
+                if not full_content.strip() or full_content == "<Multimedia omitido>": 
                     return
 
                 new_msg = Message(
@@ -957,19 +944,40 @@ def upload_chats():
             if not line:
                 continue
             
-            # Ignorar líneas de 'source' o formatos extraños del log proporcionado
-            if line.startswith('# Iniciar buffer con la primera línea
+            if line.startswith(""):
+                 logging.warning(f"Línea de cifrado ignorada: {line}")
+                 continue
+
+            msg_match = msg_start_regex.match(line)
+            sys_match = sys_msg_regex.match(line) if not msg_match else None
+            
+            if msg_match:
+                save_buffered_message(current_message_data)
+                
+                try:
+                    date_str, time_str, author, msg_content = msg_match.groups()
+                    
+                    time_str = time_str.replace('a. m.', 'AM').replace('p. m.', 'PM')
+                    timestamp_str = f"{date_str} {time_str}"
+                    timestamp = datetime.strptime(timestamp_str, '%d/%m/%y %I:%M %p')
+                except ValueError as e:
+                    logging.warning(f"No se pudo parsear la fecha/hora: '{timestamp_str}'. Línea: {line}. Error: {e}")
+                    continue
+
+                sender_type = 'agent' if author == agent_name else 'user'
+                
+                current_message_data = {
+                    'timestamp': timestamp,
+                    'sender_type': sender_type,
+                    'content_lines': [msg_content]
                 }
                 last_message_time = timestamp
-                messages_added += 1 # Contar solo al inicio de un nuevo mensaje
+                messages_added += 1 
 
             elif sys_match:
-                # Es un mensaje de sistema
-                # 1. Guardar el mensaje anterior
                 save_buffered_message(current_message_data)
-                current_message_data = None # Detener el buffer, no añadir continuaciones
+                current_message_data = None 
                 
-                # 2. Procesar el mensaje de sistema (y probablemente ignorarlo)
                 msg_content = sys_match.groups()[2]
                 if "cifrados de extremo a extremo" in msg_content or \
                    "<Multimedia omitido>" in msg_content or \
@@ -977,17 +985,12 @@ def upload_chats():
                    "te añadió" in msg_content or \
                    "Los mensajes y las llamadas están cifrados" in msg_content:
                     continue
-                # Aquí se podrían guardar otros mensajes de sistema si se quisiera
-
+                
             elif current_message_data:
-                # Es una línea de continuación (multilínea)
-                # Simplemente añadir al buffer del mensaje actual
                 current_message_data['content_lines'].append(line)
 
-        # Fin del bucle: guardar el último mensaje que queda en el buffer
         save_buffered_message(current_message_data)
         
-        # Actualizar el timestamp de la conversación al del último mensaje
         if last_message_time:
             convo.updated_at = last_message_time
         
@@ -995,7 +998,6 @@ def upload_chats():
         
         if messages_added == 0:
             logging.warning(f"Importación para {user_phone} completada, pero 0 mensajes coincidieron. Verificar Regex y nombre de agente '{agent_name}'.")
-            # Devolver error específico si no se añadió nada
             return jsonify({"error": f"Importación finalizada, pero se añadieron 0 mensajes. Tu nombre de usuario ('{agent_name}') no coincide con ningún autor en el archivo .txt."}), 400
 
         return jsonify({"success": True, "message": f"Chat importado para {user_phone}. Se añadieron {messages_added} mensajes."})
@@ -1005,7 +1007,6 @@ def upload_chats():
         logging.error(f"Error fatal en /api/admin/upload_chats: {e}")
         logging.exception(e)
         return jsonify({"error": str(e)}), 500
-# --- FIN DE MODIFICACIÓN ---
 
 
 # --- APIs DE DASHBOARD ---
@@ -1097,7 +1098,6 @@ def init_db(app_instance):
                 logging.info("Creando configuración de bot por defecto.")
                 db.session.add(BotConfig(is_active=True, whatsapp_number="+573132217862", welcome_message="¡Hola! Bienvenido a nuestro servicio de atención. ¿En qué puedo ayudarte hoy?"))
             
-            # Asegurar que el rol 'General' exista
             if not BotRole.query.filter_by(title='General').first():
                 logging.info("Creando rol por defecto: 'General'")
                 db.session.add(BotRole(title='General', knowledge_base='Preguntas frecuentes o chat inicial.', status='Activo'))
@@ -1118,7 +1118,6 @@ def init_db(app_instance):
             db.session.rollback()
             logging.error(f"Error durante la inicialización de la BD: {e}")
 
-# Llama a la inicialización aquí
 init_db(app)
 
 if __name__ == '__main__':

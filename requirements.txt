@@ -1,9 +1,9 @@
 Flask
 Flask-SQLAlchemy
-psycopg2-binary
-Werkzeug
-gunicorn
 python-dotenv
 twilio
+requests
 google-generativeai
 Flask-Login
+psycopg2-binary
+gunicorn
