@@ -104,16 +104,16 @@ class Conversation(db.Model):
     unread_count = db.Column(db.Integer, default=0)
     bot_role_id = db.Column(db.Integer, db.ForeignKey('bot_roles.id'), nullable=False)
     
-    # --- INICIO DE MODIFICACIÓN ---
+    # --- INDENTACIÓN CRÍTICA ---
     user_display_name = db.Column(db.String(120), nullable=True)
     user_reported_phone = db.Column(db.String(50), nullable=True)
-    # --- FIN DE MODIFICACIÓN ---
+    # --- FIN INDENTACIÓN CRÍTICA ---
     
     bot_role = db.relationship('BotRole', back_populates='conversations')
     messages = db.relationship('Message', back_populates='conversation', cascade="all, delete-orphan", order_by='Message.timestamp')
     
     import_source = db.Column(db.String(100), nullable=True, default=None) 
-    pending_counted = db.Column(db.Boolean, default=False) 
+    pending_counted = db.Column(db.Boolean, default=False)
 
     def get_last_message(self):
         if self.messages:
@@ -367,9 +367,7 @@ def send_reply(phone_number, message_content):
     
     try:
         logging.info(f"Enviando respuesta a Baileys: {send_url} (Para: {phone_number})")
-        # --- MODIFICACIÓN: Aumentar el timeout ---
         response = requests.post(send_url, json=payload, timeout=30)
-        # --- FIN DE MODIFICACIÓN ---
         
         if response.status_code != 200:
             logging.error(f"El bot de Baileys respondió con {response.status_code}: {response.text}")
@@ -648,7 +646,7 @@ def get_ia_response_and_route(convo, message_body):
                 # Opción inválida, repetir el sub-menú
                 return ("chat", f"La opción *'{sub_opcion}'* no es válida. Por favor, selecciona un número del 1 al 4.\n\n" + _get_cotizaciones_menu())
 
-        # --- ESTADOS FINALES DE COTIZACIÓN (Solo esperan A o enrutan a Area Cotizaciones) ---
+        # --- ESTADOS FINALES DE COTIZACIÓN (Solo esperan 'A' o enrutan a Area Cotizaciones) ---
         elif convo.status in ['ia_cotizaciones_autos', 'ia_cotizaciones_hogar', 'ia_cotizaciones_empresa']:
             # Cualquier otro mensaje en estos estados (que no sea 'A') debe enrutar a un agente de cotizaciones
             return ("route", "Area Cotizaciones")
