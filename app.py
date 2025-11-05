@@ -461,9 +461,12 @@ def _get_agent_response_and_role(option):
     
     full_response = "\n\n".join(response_parts)
     
-    # Se añade la nota de "escribe A para volver" SOLO para la opción 6
-    if option == '6':
-         full_response += "\n\n*Escribe A para volver al menú principal (si no quieres cancelar).* "
+    # --- INICIO DE MODIFICACIÓN CRÍTICA: Añadir instrucción de retorno a TODAS las rutas directas ---
+    # Se añade la nota de "escribe A para volver" a todas las opciones que enrutan
+    full_response += "\n\n*Escribe A para volver al menú principal.*"
+    # El mensaje de la opción 6 ya tiene su nota específica, pero la general la cubre.
+    # Se añade esta lógica para garantizar que la instrucción esté siempre presente.
+    # --- FIN DE MODIFICACIÓN CRÍTICA ---
 
     return mapeo_roles.get(option, "General"), full_response
 
