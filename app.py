@@ -103,10 +103,15 @@ class Conversation(db.Model):
     updated_at = db.Column(db.DateTime(timezone=True), onupdate=func.now())
     unread_count = db.Column(db.Integer, default=0)
     bot_role_id = db.Column(db.Integer, db.ForeignKey('bot_roles.id'), nullable=False)
+    
+    # --- INICIO DE MODIFICACIÓN ---
+    user_display_name = db.Column(db.String(120), nullable=True)
+    user_reported_phone = db.Column(db.String(50), nullable=True)
+    # --- FIN DE MODIFICACIÓN ---
+    
     bot_role = db.relationship('BotRole', back_populates='conversations')
     messages = db.relationship('Message', back_populates='conversation', cascade="all, delete-orphan", order_by='Message.timestamp')
     
-    # --- CAMBIO: 'import_source' ya no se usa, pero se puede mantener si se desea ---
     import_source = db.Column(db.String(100), nullable=True, default=None) 
     pending_counted = db.Column(db.Boolean, default=False) 
 
@@ -378,23 +383,27 @@ def send_reply(phone_number, message_content):
         logging.error(f"Error al llamar al bot de Baileys: {e}")
         return False
 
-def get_ia_response_and_route(messages_list):
+# --- REESCRITURA TOTAL DE LA FUNCIÓN DE IA ---
+def get_ia_response_and_route(convo, message_body):
     """
-    Gestiona la conversación con Gemini.
-    Presenta un menú, confirma la selección y luego enruta.
+    Gestiona la conversación de la IA como una máquina de estados.
+    Modifica el objeto 'convo' directamente.
     """
-    logging.info("Iniciando IA conversacional (get_ia_response_and_route)...")
-    if not genai:
-        logging.error("Módulo de IA (Gemini) no está configurado.")
-        # Fallback de seguridad: enrutar a General si Gemini falla
-        return ("route", "General") 
-
-    try:
-        # Definimos el menú aquí para que sea fácil de editar
-        menu_principal = """Hola! Bienvenido a VTN SEGUROS - Grupo Montenegro. Para nosotros es un gusto atenderte 🫡
+    logging.info(f"IA State Machine: Procesando estado '{convo.status}'")
+    
+    # Mapeo de roles (para el menú final)
+    mapeo_roles = {
+        "1": "Siniestros, Consultas Póliza, Cancelaciones", "2": "Area Cotizaciones", "3": "Ventas",
+        "4": "Renovaciones", "5": "Siniestros, Consultas Póliza, Cancelaciones",
+        "6": "Siniestros, Consultas Póliza, Cancelaciones", "7": "Soporte Técnico"
+    }
+    
+    # Texto del menú (para el final)
+    def get_main_menu(nombre_usuario):
+        nombre_personalizado = f"Hola! {nombre_usuario}, " if nombre_usuario else "Hola! "
+        return f"""{nombre_personalizado}Bienvenido a VTN SEGUROS - Grupo Montenegro. Para nosotros es un gusto atenderte 🫡
 
 Escribe el número de tu solicitud:
-
 1. Presentas un accidente. 🚑
 2. Requieres una cotización. 📊
 3. Continuar con proceso de compra.💳
@@ -405,143 +414,76 @@ Escribe el número de tu solicitud:
 
 Agradecemos la confianza depositada en nuestra labor."""
 
-        # Mapeo de números a Roles (como están definidos en tu init_db)
-        # Asegúrate de que estos roles existan en tu base de datos
-        mapeo_roles = {
-            "1": "Siniestros, Consultas Póliza, Cancelaciones", # Usado para accidentes
-            "2": "Area Cotizaciones",
-            "3": "Ventas",
-            "4": "Renovaciones",
-            "5": "Siniestros, Consultas Póliza, Cancelaciones", # Usado para consultar siniestro
-            "6": "Siniestros, Consultas Póliza, Cancelaciones", # Usado para cancelación
-            "7": "Soporte Técnico" # Usado para quejas y peticiones
-        }
+    try:
+        # --- ESTADO 1: Saludo Inicial ('ia_greeting') ---
+        if convo.status == 'ia_greeting':
+            convo.status = 'ia_ask_name' # Actualizar estado
+            db.session.add(convo)
+            return ("chat", "Hola! Bienvenido a VTN SEGUROS - Grupo Montenegro. Para nosotros es un gusto atenderte. Por favor indícame tu nombre completo.")
 
-        # Opciones de texto para el menú (para que la IA las entienda)
-        opciones_texto = {
-            "1": "Presentas un accidente",
-            "2": "Requieres una cotización",
-            "3": "Continuar con proceso de compra",
-            "4": "Inquietudes de tu póliza... y renovaciones",
-            "5": "Consultar estado de siniestro",
-            "6": "Solicitud de cancelación de póliza...",
-            "7": "Comunicarse directamente con asesor..."
-        }
+        # --- ESTADO 2: Esperando el Nombre ('ia_ask_name') ---
+        elif convo.status == 'ia_ask_name':
+            convo.user_display_name = message_body.strip() # Guardar nombre
+            convo.status = 'ia_ask_phone' # Actualizar estado
+            db.session.add(convo)
+            return ("chat", f"Gracias {convo.user_display_name}. Ahora, por favor, indícame tu número de celular.")
 
+        # --- ESTADO 3: Esperando el Teléfono ('ia_ask_phone') ---
+        elif convo.status == 'ia_ask_phone':
+            convo.user_reported_phone = message_body.strip() # Guardar teléfono
+            convo.status = 'ia_confirm_details' # Actualizar estado
+            db.session.add(convo)
+            return ("chat", f"Tu nombre es {convo.user_display_name} y tu celular es el {convo.user_reported_phone}. ¿Es esto correcto? (Responde 'sí' o 'no')")
 
-        system_prompt = f"""
-        Eres 'Montenegro', un asistente virtual de VTN SEGUROS. Tu ÚNICO trabajo es presentar un menú, obtener una selección numérica (1-7), confirmar esa selección y luego enrutar.
-
-        Este es el menú que *siempre* debes mostrar al inicio y si el usuario se equivoca o escribe texto inválido:
-        ---
-        {menu_principal}
-        ---
-
-        Este es el mapeo de números a Roles (NO muestres esto al usuario, es tu guía interna):
-        - "1": "{mapeo_roles['1']}"
-        - "2": "{mapeo_roles['2']}"
-        - "3": "{mapeo_roles['3']}"
-        - "4": "{mapeo_roles['4']}"
-        - "5": "{mapeo_roles['5']}"
-        - "6": "{mapeo_roles['6']}"
-        - "7": "{mapeo_roles['7']}"
-
-        Reglas de Conversación:
-        1.  **Primer Mensaje (Historial vacío o 1 mensaje de usuario):** Si el historial está vacío o solo contiene un saludo del usuario (como 'hola'), responde *únicamente* con el menú completo. No añadas nada más.
-        2.  **Usuario selecciona un número (ej: '2'):**
-            - Busca el rol (ej: "Area Cotizaciones") y el texto de la opción (ej: "Requieres una cotización").
-            - Responde *únicamente* con el JSON de confirmación:
-              {{"action": "chat", "response_message": "Seleccionaste la opción 2: 'Requieres una cotización'. ¿Es esto correcto? (Responde 'sí' o 'no')"}}
-        3.  **Usuario confirma (ej: 'sí', 'correcto', 'si es'):**
-            - (Esto ocurre DESPUÉS de tu pregunta de confirmación).
-            - Identifica el rol que estabas confirmando (ej: "Area Cotizaciones").
-            - Responde *únicamente* con el JSON de enrutamiento:
-              {{"action": "route", "role_title": "Area Cotizaciones"}}
-        4.  **Usuario niega (ej: 'no', 'me equivoqué'):**
-            - Responde *únicamente* con el menú completo de nuevo.
-        5.  **Usuario envía texto inválido (ej: 'ayuda', 'quiero un seguro'):**
-            - Responde *únicamente* con el menú completo de nuevo.
-
-        Historial de Conversación (último mensaje es del usuario):
-        """
-
-        chat_history_for_prompt = []
-        for msg in messages_list:
-            if msg.sender_type == 'user':
-                chat_history_for_prompt.append(f"Usuario: {msg.content}")
-            elif msg.sender_type == 'system':
-                # Si el mensaje del sistema es el menú, no lo incluyas en el historial
-                if menu_principal not in msg.content:
-                    chat_history_for_prompt.append(f"Montenegro: {msg.content}")
-        
-        # --- LÓGICA SIMPLIFICADA PARA EL PRIMER MENSAJE ---
-        # Si solo hay 1 mensaje (del usuario), forzamos la respuesta del menú
-        # Esto evita que la IA intente "continuar" una conversación que no existe
-        if len(messages_list) == 1 and messages_list[0].sender_type == 'user':
-             logging.info("Forzando menú de bienvenida para el primer mensaje.")
-             return ("chat", menu_principal)
-        
-        final_prompt = system_prompt + "\n".join(chat_history_for_prompt)
-
-        logging.info(f"Enviando prompt a Gemini 2.5-flash...")
-        model = genai.GenerativeModel('gemini-2.5-flash')
-        response = model.generate_content(final_prompt)
-        
-        response_text = response.text.strip()
-        logging.info(f"Respuesta de Gemini: {response_text}")
-
-        try:
-            # Limpiar el markdown JSON si Gemini lo envía
-            if response_text.startswith("```json"):
-                response_text = re.sub(r"```json\n(.*?)\n```", r"\1", response_text, flags=re.DOTALL)
+        # --- ESTADO 4: Esperando Confirmación ('ia_confirm_details') ---
+        elif convo.status == 'ia_confirm_details':
+            respuesta_limpia = message_body.strip().lower()
             
-            data = json.loads(response_text)
-            action = data.get("action")
+            if respuesta_limpia in ['sí', 'si', 's', 'correcto', 'si es']:
+                convo.status = 'ia_show_menu' # Actualizar estado
+                db.session.add(convo)
+                # Enviar el menú principal personalizado
+                return ("chat", get_main_menu(convo.user_display_name))
             
-            if action == "route":
-                role_title = data.get("role_title")
-                # Verificamos que el rol exista en nuestro mapeo
-                if role_title in mapeo_roles.values():
-                    logging.info(f"IA decidió ENRUTAR a: '{role_title}'")
-                    return ("route", role_title)
-                else:
-                    logging.warning(f"IA intentó enrutar a rol inválido: '{role_title}'. Mostrando menú.")
-                    return ("chat", menu_principal) # Fallback si el rol no existe
-
-            elif action == "chat":
-                message = data.get("response_message")
-                logging.info(f"IA decidió CHATEAR: '{message}'")
-                # Si el mensaje es el menú, nos aseguramos que sea el texto exacto
-                if "Escribe el número de tu solicitud" in message:
-                    return ("chat", menu_principal)
-                else:
-                    return ("chat", message)
+            elif respuesta_limpia in ['no', 'n', 'incorrecto']:
+                # Reiniciar el proceso
+                convo.status = 'ia_ask_name'
+                convo.user_display_name = None # Borrar datos
+                convo.user_reported_phone = None # Borrar datos
+                db.session.add(convo)
+                return ("chat", "Entendido, empecemos de nuevo. Por favor indícame tu nombre completo.")
             
             else:
-                raise ValueError("JSON de IA no tiene 'action' válido.")
+                # No entendió, repetir la pregunta de confirmación
+                return ("chat", f"No entendí tu respuesta. Por favor, dime 'sí' o 'no'.\n\n¿Tus datos son correctos?\nNombre: {convo.user_display_name}\nCelular: {convo.user_reported_phone}")
 
-        except (json.JSONDecodeError, ValueError, TypeError) as e:
-            logging.warning(f"Respuesta de Gemini no fue JSON válido ({e}). Tratando como chat: {response_text}")
-            # Si Gemini no devuelve JSON, probablemente es el menú o un error
-            # Si contiene el texto clave del menú, enviamos el menú limpio.
-            if "Escribe el número de tu solicitud" in response_text:
-                return ("chat", menu_principal)
+        # --- ESTADO 5: Mostrando el Menú (Esperando opción 1-7) ('ia_show_menu') ---
+        elif convo.status == 'ia_show_menu':
+            opcion = message_body.strip()
             
-            # Si no es JSON y no es el menú, es una respuesta de chat simple (aunque no debería pasar)
-            clean_response = response_text.replace("*", "").strip()
-            if not clean_response:
-                clean_response = menu_principal # Fallback final
-            return ("chat", clean_response)
+            if opcion in mapeo_roles:
+                role_title = mapeo_roles[opcion]
+                # ¡Éxito! Enrutar al agente
+                return ("route", role_title)
+            else:
+                # Opción inválida, repetir el menú
+                return ("chat", f"La opción '{opcion}' no es válida. Por favor, selecciona un número del 1 al 7.\n\n" + get_main_menu(convo.user_display_name))
+        
+        # --- ESTADO FALLBACK (Por si acaso) ---
+        else:
+            convo.status = 'ia_greeting' # Reiniciar
+            db.session.add(convo)
+            return ("chat", "Parece que hubo un error. Empecemos de nuevo. Hola! Bienvenido a VTN SEGUROS...")
 
     except Exception as e:
-        logging.error(f"Error en la llamada a la API de Gemini: {e}")
-        # Si Gemini falla, enviamos el menú para que el usuario al menos pueda intentarlo
-        return ("chat", menu_principal)
+        logging.error(f"Error en la máquina de estados de IA: {e}")
+        # Fallback de seguridad: enrutar a General
+        return ("route", "General")
+# --- FIN DE REESCRITURA ---
 
-# --- WEBHOOK MODIFICADO PARA BAILEYS ---
+# --- WEBHOOK MODIFICADO PARA BAILEYS (CON MÁQUINA DE ESTADOS) ---
 @app.route('/api/baileys/webhook', methods=['POST'])
 def baileys_webhook():
-    # Leer desde JSON, no desde Form
     data = request.json
     message_body = data.get('Body')
     sender_phone = data.get('From')
@@ -553,10 +495,8 @@ def baileys_webhook():
     logging.info(f"Mensaje (Baileys) recibido de {sender_phone}: {message_body}")
 
     try:
-        # Buscar la conversación más reciente con este número
-        existing_convo = Conversation.query.filter_by(user_phone=sender_phone).order_by(Conversation.created_at.desc()).first()
-
         # Escenario A: Chat abierto y asignado a un humano
+        existing_convo = Conversation.query.filter_by(user_phone=sender_phone).order_by(Conversation.created_at.desc()).first()
         if existing_convo and existing_convo.status == 'open':
             logging.info(f"Conversación ABIERTA (ID: {existing_convo.id}) encontrada para {sender_phone}. Enviando a agente.")
             new_message = Message(conversation_id=existing_convo.id, sender_type='user', content=message_body)
@@ -568,7 +508,6 @@ def baileys_webhook():
                 role.chats_pending = (role.chats_pending or 0) + 1
                 existing_convo.pending_counted = True
             db.session.commit()
-            # Devolver JSON OK (no TwiML)
             return jsonify({"status": "message_queued"}), 200
 
         bot_config = BotConfig.query.first()
@@ -576,120 +515,87 @@ def baileys_webhook():
             logging.info("Bot inactivo. Ignorando mensaje.")
             return jsonify({"status": "bot_inactive"}), 200
 
-        # Escenario B: Chat en fase de saludo/IA ('ia_greeting')
-        if existing_convo and existing_convo.status == 'ia_greeting':
-            logging.info(f"Continuando chat IA (ID: {existing_convo.id}) para {sender_phone}.")
+        # --- INICIO DE MODIFICACIÓN: Lógica de IA + guardado de mensajes ---
+        
+        # Escenario B: Chat en CUALQUIER fase de IA ('ia_greeting', 'ia_ask_name', etc.)
+        if existing_convo and existing_convo.status.startswith('ia_'):
+            logging.info(f"Continuando chat IA (ID: {existing_convo.id}, Estado: {existing_convo.status})")
             convo = existing_convo
+            
+            # Guardar el mensaje del usuario (ej. "Juan Perez", "sí", "1")
             user_msg = Message(conversation_id=convo.id, sender_type='user', content=message_body)
             db.session.add(user_msg)
             
-            messages_history = Message.query.filter_by(conversation_id=convo.id).order_by(Message.timestamp).all()
-            
-            action, data = get_ia_response_and_route(messages_history)
-            
-            if action == "route":
-                role_title = data
-                target_role = BotRole.query.filter_by(title=role_title, status='Activo').first()
-                
-                if not target_role:
-                    logging.error(f"IA enrutó a '{role_title}' pero no se encontró o está inactivo.")
-                    ia_response_msg = f"Ups, el departamento de '{role_title}' no está disponible en este momento. ¿Puedo ayudarte con algo más?"
-                    # Enviar respuesta usando el helper
-                    send_reply(sender_phone, ia_response_msg)
-                    ia_msg_db = Message(conversation_id=convo.id, sender_type='system', content=ia_response_msg)
-                    db.session.add(ia_msg_db)
-                    db.session.commit()
-                    return jsonify({"status": "route_failed"}), 200
-                
-                # --- Enrutamiento Exitoso ---
-                logging.info(f"IA enrutó chat {convo.id} a '{target_role.title}'. Cambiando status a 'open'.")
-                convo.status = 'open'
-                convo.bot_role_id = target_role.id
-                convo.pending_counted = True
-                convo.updated_at = datetime.utcnow()
-                
-                target_role.chats_received = (target_role.chats_received or 0) + 1
-                target_role.chats_pending = (target_role.chats_pending or 0) + 1
+            # Obtener la respuesta de la máquina de estados
+            action, data = get_ia_response_and_route(convo, message_body)
 
-                transfer_message = f"¡Entendido! Un agente del área de {target_role.title} te atenderá pronto."
-                # Enviar respuesta usando el helper
-                send_reply(sender_phone, transfer_message)
-                
-                system_msg_db = Message(conversation_id=convo.id, sender_type='system', content=f"Chat enrutado por IA a {target_role.title}.")
-                ia_msg_db = Message(conversation_id=convo.id, sender_type='system', content=transfer_message)
-                db.session.add_all([system_msg_db, ia_msg_db])
-                db.session.commit()
-                
-                return jsonify({"status": "routed_successfully"}), 200
+        # Escenario C: Conversación nueva (o 'closed')
+        else:
+            logging.info(f"Creando nueva conversación IA para {sender_phone}.")
+            general_role = BotRole.query.filter_by(title='General').first()
+            if not general_role:
+                 logging.error("CRÍTICO: No se encontró el rol 'General' para iniciar chats IA.")
+                 return jsonify({"error": "Configuración interna del servidor"}), 500
 
-            elif action == "chat":
-                # --- IA Sigue Chateando ---
-                ia_response_msg = data
-                # Enviar respuesta usando el helper
+            convo = Conversation(user_phone=sender_phone, bot_role_id=general_role.id, status='ia_greeting')
+            db.session.add(convo)
+            db.session.flush() # Para obtener el convo.id
+            
+            # Guardar el primer mensaje del usuario (ej. "Hola")
+            user_msg = Message(conversation_id=convo.id, sender_type='user', content=message_body)
+            db.session.add(user_msg)
+            
+            # Obtener la respuesta de la máquina de estados (que será el "ask name")
+            action, data = get_ia_response_and_route(convo, message_body)
+        
+        # --- PROCESAR LA ACCIÓN DE LA IA ---
+        
+        if action == "route":
+            role_title = data
+            target_role = BotRole.query.filter_by(title=role_title, status='Activo').first()
+            
+            if not target_role:
+                logging.error(f"IA enrutó a '{role_title}' pero no se encontró o está inactivo.")
+                ia_response_msg = f"Ups, el departamento de '{role_title}' no está disponible en este momento. ¿Puedo ayudarte con algo más?"
                 send_reply(sender_phone, ia_response_msg)
                 ia_msg_db = Message(conversation_id=convo.id, sender_type='system', content=ia_response_msg)
                 db.session.add(ia_msg_db)
-                convo.updated_at = datetime.utcnow()
                 db.session.commit()
-                return jsonify({"status": "chat_reply_sent"}), 200
-        
-        # Escenario C: Conversación nueva (o 'closed')
-        logging.info(f"No hay conversación activa para {sender_phone}. Creando nueva conversación IA.")
-        
-        general_role = BotRole.query.filter_by(title='General').first()
-        if not general_role:
-             logging.error("CRÍTICO: No se encontró el rol 'General' para iniciar chats IA.")
-             return jsonify({"error": "Configuración interna del servidor"}), 500
+                return jsonify({"status": "route_failed"}), 200
+            
+            logging.info(f"IA enrutó chat {convo.id} a '{target_role.title}'. Cambiando status a 'open'.")
+            convo.status = 'open'
+            convo.bot_role_id = target_role.id
+            convo.pending_counted = True
+            
+            target_role.chats_received = (target_role.chats_received or 0) + 1
+            target_role.chats_pending = (target_role.chats_pending or 0) + 1
 
-        convo = Conversation(user_phone=sender_phone, bot_role_id=general_role.id, status='ia_greeting')
-        db.session.add(convo)
-        db.session.flush() # Para obtener el convo.id
-
-        user_msg = Message(conversation_id=convo.id, sender_type='user', content=message_body)
-        db.session.add(user_msg)
-        
-        action, data = get_ia_response_and_route([user_msg])
-
-        if action == "route": # Improbable en el primer mensaje, pero posible
-            role_title = data
-            target_role = BotRole.query.filter_by(title=role_title, status='Activo').first()
-            if target_role:
-                logging.info(f"IA enrutó chat {convo.id} INMEDIATAMENTE a '{target_role.title}'.")
-                convo.status = 'open'
-                convo.bot_role_id = target_role.id
-                convo.pending_counted = True
-                target_role.chats_received = (target_role.chats_received or 0) + 1
-                target_role.chats_pending = (target_role.chats_pending or 0) + 1
-                
-                transfer_message = f"¡Entendido! Un agente del área de {target_role.title} te atenderá pronto."
-                # Enviar respuesta usando el helper
-                send_reply(sender_phone, transfer_message)
-                
-                system_msg_db = Message(conversation_id=convo.id, sender_type='system', content=f"Chat enrutado por IA a {target_role.title}.")
-                ia_msg_db = Message(conversation_id=convo.id, sender_type='system', content=transfer_message)
-                db.session.add_all([system_msg_db, ia_msg_db])
-            else:
-                action = "chat"
-                data = "¡Hola! Soy Montenegro, tu asistente virtual de Seguros Montenegro. ¿En qué puedo ayudarte hoy?"
-        
-        if action == "chat":
+            transfer_message = f"¡Entendido! Un agente del área de {target_role.title} te atenderá pronto."
+            send_reply(sender_phone, transfer_message)
+            
+            system_msg_db = Message(conversation_id=convo.id, sender_type='system', content=f"Chat enrutado por IA a {target_role.title}.")
+            ia_msg_db = Message(conversation_id=convo.id, sender_type='system', content=transfer_message)
+            db.session.add_all([system_msg_db, ia_msg_db])
+            
+        elif action == "chat":
+            # IA Sigue Chateando (ej. "ask phone", "confirm details", "menu")
             ia_response_msg = data
-            # Enviar respuesta usando el helper
             send_reply(sender_phone, ia_response_msg)
+            # Guardar la respuesta del bot
             ia_msg_db = Message(conversation_id=convo.id, sender_type='system', content=ia_response_msg)
             db.session.add(ia_msg_db)
-        
+
         convo.updated_at = datetime.utcnow()
         db.session.commit()
-        return jsonify({"status": "new_convo_reply_sent"}), 200
+        return jsonify({"status": "ia_processed"}), 200
+        # --- FIN DE MODIFICACIÓN ---
 
     except Exception as e:
         db.session.rollback()
         logging.error(f"Error fatal en el webhook de Baileys: {e}")
         logging.exception(e) 
         return jsonify({"error": "Error interno del servidor"}), 500
-# --- FIN DE MODIFICACIÓN: Webhook ---
-
 
 # --- APIS DE CHAT (PROTEGIDAS Y FILTRADAS) ---
 
@@ -697,20 +603,17 @@ def baileys_webhook():
 @login_required
 def get_chats():
     try:
-        # Leer el estado deseado desde los query params, por defecto 'open'
         chat_status = request.args.get('status', 'open') 
         if chat_status not in ['open', 'closed']:
             chat_status = 'open'
 
         conversations_query = None
         if current_user.role == 'Admin':
-            # Admin ve todos los chats del estado solicitado
             conversations_query = Conversation.query.filter_by(status=chat_status).options(
                 db.joinedload(Conversation.messages),
                 db.joinedload(Conversation.bot_role)
             )
         else:
-            # Soporte ve solo chats del estado solicitado de sus roles asignados
             assigned_role_ids = [role.id for role in current_user.assigned_roles]
             if assigned_role_ids:
                 conversations_query = Conversation.query.filter(
@@ -722,9 +625,8 @@ def get_chats():
                 )
             else:
                 logging.info(f"Usuario {current_user.username} (Soporte) no tiene roles asignados.")
-                return jsonify([]) # Devolver lista vacía
+                return jsonify([]) 
 
-        # Asegurarse de que la query no sea None antes de continuar
         if conversations_query is None:
              return jsonify([])
 
@@ -734,16 +636,19 @@ def get_chats():
         for convo in open_conversations:
             last_msg = convo.get_last_message()
             
-            # --- INICIO DE CORRECCIÓN ---
-            # Limpiamos el JID (ej: "12345@lid" o "whatsapp:+12345") para la UI
-            clean_phone = convo.user_phone.split('@')[0] # Obtiene la parte antes del '@'
-            clean_phone = clean_phone.replace('whatsapp:', '').replace('+', '') # Limpieza extra por si acaso
-            # --- FIN DE CORRECCIÓN ---
+            # --- INICIO DE MODIFICACIÓN ---
+            # Fallback JID (el ID ...@lid)
+            clean_phone = convo.user_phone.split('@')[0].replace('whatsapp:', '').replace('+', '')
+            
+            # Usar el nombre/teléfono reportado si existe, si no, el JID
+            display_name = convo.user_display_name or clean_phone
+            display_phone = convo.user_reported_phone or clean_phone
+            # --- FIN DE MODIFICACIÓN ---
             
             chat_list.append({
                 "id": convo.id,
-                "name": clean_phone, # <-- Usar el número limpio
-                "phone": clean_phone, # <-- Usar el número limpio
+                "name": display_name,  # <-- MODIFICADO
+                "phone": display_phone, # <-- MODIFICADO
                 "time": last_msg.timestamp.strftime("%I:%M %p") if last_msg and last_msg.timestamp else 'N/A',
                 "unread": convo.unread_count or 0,
                 "last_message": last_msg.content if last_msg else "Sin mensajes",
@@ -754,7 +659,7 @@ def get_chats():
         return jsonify(chat_list)
     except Exception as e:
         logging.error(f"Error en /api/chats: {e}")
-        logging.exception(e) # Imprime el stack trace para más detalles
+        logging.exception(e) 
         return jsonify({"error": str(e)}), 500
 
 @app.route('/api/chats/<int:convo_id>/messages', methods=['GET'])
