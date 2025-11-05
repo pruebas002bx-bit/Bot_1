@@ -727,7 +727,7 @@ def send_chat_message(convo_id):
         # --- REEMPLAZO DE TWILIO ---
         # Hacemos una petición POST al endpoint /send de nuestro bot.js
         
-        send_url = f"{bailele_bot_url}/send"
+        send_url = f"{baileys_bot_url}/send"
         payload = {
             "number": convo.user_phone, # app.py ya lo guarda como 'whatsapp:+...'
             "message": content
