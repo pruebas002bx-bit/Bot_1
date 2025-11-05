@@ -355,47 +355,89 @@ def send_reply(phone_number, message_content):
         logging.error(f"Error al llamar al bot de Baileys: {e}")
         return False
 
-# --- Función create_twilio_response ELIMINADA ---
-
 def get_ia_response_and_route(messages_list):
     """
     Gestiona la conversación con Gemini.
-    Decide si chatear más o enrutar.
+    Presenta un menú, confirma la selección y luego enruta.
     """
     logging.info("Iniciando IA conversacional (get_ia_response_and_route)...")
     if not genai:
         logging.error("Módulo de IA (Gemini) no está configurado.")
+        # Fallback de seguridad: enrutar a General si Gemini falla
         return ("route", "General") 
 
     try:
-        all_roles = BotRole.query.filter(BotRole.status == 'Activo', BotRole.title != 'General').all()
-        if not all_roles:
-            logging.error("No hay roles (aparte de 'General') activos en la BD para enrutar.")
-            return ("chat", "¡Hola! Soy Montenegro, tu asistente virtual de Seguros Montenegro. Actualmente todos nuestros departamentos están ocupados, pero déjame tu consulta y te atenderemos lo antes posible.")
+        # Definimos el menú aquí para que sea fácil de editar
+        menu_principal = """Hola! Bienvenido a VTN SEGUROS - Grupo Montenegro. Para nosotros es un gusto atenderte 🫡
 
-        prompt_roles = ""
-        for role in all_roles:
-            prompt_roles += f"- Título: {role.title}\n  Descripción: {role.knowledge_base}\n"
+Escribe el número de tu solicitud:
+
+1. Presentas un accidente. 🚑
+2. Requieres una cotización. 📊
+3. Continuar con proceso de compra.💳
+4. Inquietudes de tu póliza, certificados, coberturas, pagos y renovaciones.✍🏼
+5. Consultar estado de siniestro⏳
+6. Solicitud de cancelación de póliza y reintegro de dinero.📝
+7. Comunicarse directamente con asesor por motivo de quejas y peticiones. ☹
+
+Agradecemos la confianza depositada en nuestra labor."""
+
+        # Mapeo de números a Roles (como están definidos en tu init_db)
+        # Asegúrate de que estos roles existan en tu base de datos
+        mapeo_roles = {
+            "1": "Siniestros, Consultas Póliza, Cancelaciones", # Usado para accidentes
+            "2": "Area Cotizaciones",
+            "3": "Ventas",
+            "4": "Renovaciones",
+            "5": "Siniestros, Consultas Póliza, Cancelaciones", # Usado para consultar siniestro
+            "6": "Siniestros, Consultas Póliza, Cancelaciones", # Usado para cancelación
+            "7": "Soporte Técnico" # Usado para quejas y peticiones
+        }
+
+        # Opciones de texto para el menú (para que la IA las entienda)
+        opciones_texto = {
+            "1": "Presentas un accidente",
+            "2": "Requieres una cotización",
+            "3": "Continuar con proceso de compra",
+            "4": "Inquietudes de tu póliza... y renovaciones",
+            "5": "Consultar estado de siniestro",
+            "6": "Solicitud de cancelación de póliza...",
+            "7": "Comunicarse directamente con asesor..."
+        }
+
 
         system_prompt = f"""
-        Eres 'Montenegro', un asistente virtual experto de Seguros Montenegro.
-        Tu objetivo es entender la necesidad del cliente y, *solo cuando estés seguro de su intención*, clasificarla en uno de los roles disponibles.
-        Si no estás seguro, *debes* hacer preguntas de aclaración.
+        Eres 'Montenegro', un asistente virtual de VTN SEGUROS. Tu ÚNICO trabajo es presentar un menú, obtener una selección numérica (1-7), confirmar esa selección y luego enrutar.
 
-        Roles Disponibles para enrutar:
-        {prompt_roles}
+        Este es el menú que *siempre* debes mostrar al inicio y si el usuario se equivoca o escribe texto inválido:
+        ---
+        {menu_principal}
+        ---
+
+        Este es el mapeo de números a Roles (NO muestres esto al usuario, es tu guía interna):
+        - "1": "{mapeo_roles['1']}"
+        - "2": "{mapeo_roles['2']}"
+        - "3": "{mapeo_roles['3']}"
+        - "4": "{mapeo_roles['4']}"
+        - "5": "{mapeo_roles['5']}"
+        - "6": "{mapeo_roles['6']}"
+        - "7": "{mapeo_roles['7']}"
 
         Reglas de Conversación:
-        1.  Para el primer mensaje del usuario: Preséntate *siempre* como "¡Hola! Soy Montenegro, tu asistente virtual de Seguros Montenegro." y luego añade tu pregunta o respuesta.
-        2.  Ejemplo de primer mensaje (Usuario: "info"): "¡Hola! Soy Montenegro, tu asistente virtual de Seguros Montenegro. ¿En qué puedo ayudarte hoy?"
-        3.  Ejemplo de primer mensaje (Usuario: "quiero comprar"): "¡Hola! Soy Montenegro, tu asistente virtual de Seguros Montenegro. ¡Claro! ¿Te refieres a comprar un seguro nuevo o a gestionar una renovación?"
-        4.  Si la intención del usuario es ambigua (ej: 'quiero comprar'), ofrece opciones (ej: 'Claro, ¿te refieres a un seguro nuevo o a una renovación?').
-        5.  Antes de enrutar, *siempre* confirma la intención (ej: El usuario dice 'renovación'. Tú respondes: 'Entendido, ¿puedes confirmarme que deseas gestionar una renovación?').
-        6.  Si el cliente confirma ('sí', 'correcto', 'eso es'), responde *únicamente* con el JSON:
-            {{"action": "route", "role_title": "[Título del Rol]"}}
-        7.  Si el cliente niega la confirmación ('no', 'no es eso'), pide más detalles (ej: 'Entendido. ¿Podrías describirme mejor lo que necesitas?').
-        8.  Para cualquier otra respuesta (saludos, aclaraciones, negaciones), responde *únicamente* con el JSON:
-            {{"action": "chat", "response_message": "[Tu respuesta o pregunta]"}}
+        1.  **Primer Mensaje (Historial vacío o 1 mensaje de usuario):** Si el historial está vacío o solo contiene un saludo del usuario (como 'hola'), responde *únicamente* con el menú completo. No añadas nada más.
+        2.  **Usuario selecciona un número (ej: '2'):**
+            - Busca el rol (ej: "Area Cotizaciones") y el texto de la opción (ej: "Requieres una cotización").
+            - Responde *únicamente* con el JSON de confirmación:
+              {{"action": "chat", "response_message": "Seleccionaste la opción 2: 'Requieres una cotización'. ¿Es esto correcto? (Responde 'sí' o 'no')"}}
+        3.  **Usuario confirma (ej: 'sí', 'correcto', 'si es'):**
+            - (Esto ocurre DESPUÉS de tu pregunta de confirmación).
+            - Identifica el rol que estabas confirmando (ej: "Area Cotizaciones").
+            - Responde *únicamente* con el JSON de enrutamiento:
+              {{"action": "route", "role_title": "Area Cotizaciones"}}
+        4.  **Usuario niega (ej: 'no', 'me equivoqué'):**
+            - Responde *únicamente* con el menú completo de nuevo.
+        5.  **Usuario envía texto inválido (ej: 'ayuda', 'quiero un seguro'):**
+            - Responde *únicamente* con el menú completo de nuevo.
 
         Historial de Conversación (último mensaje es del usuario):
         """
@@ -405,7 +447,16 @@ def get_ia_response_and_route(messages_list):
             if msg.sender_type == 'user':
                 chat_history_for_prompt.append(f"Usuario: {msg.content}")
             elif msg.sender_type == 'system':
-                chat_history_for_prompt.append(f"Montenegro: {msg.content}")
+                # Si el mensaje del sistema es el menú, no lo incluyas en el historial
+                if menu_principal not in msg.content:
+                    chat_history_for_prompt.append(f"Montenegro: {msg.content}")
+        
+        # --- LÓGICA SIMPLIFICADA PARA EL PRIMER MENSAJE ---
+        # Si solo hay 1 mensaje (del usuario), forzamos la respuesta del menú
+        # Esto evita que la IA intente "continuar" una conversación que no existe
+        if len(messages_list) == 1 and messages_list[0].sender_type == 'user':
+             logging.info("Forzando menú de bienvenida para el primer mensaje.")
+             return ("chat", menu_principal)
         
         final_prompt = system_prompt + "\n".join(chat_history_for_prompt)
 
@@ -417,6 +468,7 @@ def get_ia_response_and_route(messages_list):
         logging.info(f"Respuesta de Gemini: {response_text}")
 
         try:
+            # Limpiar el markdown JSON si Gemini lo envía
             if response_text.startswith("```json"):
                 response_text = re.sub(r"```json\n(.*?)\n```", r"\1", response_text, flags=re.DOTALL)
             
@@ -425,32 +477,43 @@ def get_ia_response_and_route(messages_list):
             
             if action == "route":
                 role_title = data.get("role_title")
-                role_titles = [role.title for role in all_roles]
-                if role_title in role_titles:
+                # Verificamos que el rol exista en nuestro mapeo
+                if role_title in mapeo_roles.values():
                     logging.info(f"IA decidió ENRUTAR a: '{role_title}'")
                     return ("route", role_title)
                 else:
-                    logging.warning(f"IA intentó enrutar a rol inválido: '{role_title}'. Pidiendo aclaración.")
-                    return ("chat", "Entendido, pero no estoy seguro de a qué departamento transferirte. ¿Podrías ser más específico?")
+                    logging.warning(f"IA intentó enrutar a rol inválido: '{role_title}'. Mostrando menú.")
+                    return ("chat", menu_principal) # Fallback si el rol no existe
 
             elif action == "chat":
                 message = data.get("response_message")
                 logging.info(f"IA decidió CHATEAR: '{message}'")
-                return ("chat", message)
+                # Si el mensaje es el menú, nos aseguramos que sea el texto exacto
+                if "Escribe el número de tu solicitud" in message:
+                    return ("chat", menu_principal)
+                else:
+                    return ("chat", message)
             
             else:
                 raise ValueError("JSON de IA no tiene 'action' válido.")
 
         except (json.JSONDecodeError, ValueError, TypeError) as e:
             logging.warning(f"Respuesta de Gemini no fue JSON válido ({e}). Tratando como chat: {response_text}")
+            # Si Gemini no devuelve JSON, probablemente es el menú o un error
+            # Si contiene el texto clave del menú, enviamos el menú limpio.
+            if "Escribe el número de tu solicitud" in response_text:
+                return ("chat", menu_principal)
+            
+            # Si no es JSON y no es el menú, es una respuesta de chat simple (aunque no debería pasar)
             clean_response = response_text.replace("*", "").strip()
             if not clean_response:
-                clean_response = "No estoy seguro de cómo responder a eso. ¿Puedes reformularlo?"
+                clean_response = menu_principal # Fallback final
             return ("chat", clean_response)
 
     except Exception as e:
         logging.error(f"Error en la llamada a la API de Gemini: {e}")
-        return ("chat", "Estoy teniendo problemas técnicos. Por favor, espera un momento.")
+        # Si Gemini falla, enviamos el menú para que el usuario al menos pueda intentarlo
+        return ("chat", menu_principal)
 
 # --- WEBHOOK MODIFICADO PARA BAILEYS ---
 @app.route('/api/baileys/webhook', methods=['POST'])
