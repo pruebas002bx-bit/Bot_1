@@ -659,7 +659,7 @@ def get_ia_response_and_route(convo, message_body):
         db.session.add(convo)
         return ("chat", "Parece que hubo un error. Empecemos de nuevo. ¡Hola! Bienvenido a *VTN SEGUROS*...")
 
-# --- WEBHOOK MODIFICADO PARA BAILEYS (CON MÁQUINA DE ESTADOS) ---
+# --- WEBHOOK MODIFICADO PARA BAILEYS (CON RECONOCIMIENTO DE 'A' EN CHAT ABIERTO) ---
 @app.route('/api/baileys/webhook', methods=['POST'])
 def baileys_webhook():
     data = request.json
@@ -675,6 +675,34 @@ def baileys_webhook():
     try:
         # Escenario A: Chat abierto y asignado a un humano
         existing_convo = Conversation.query.filter_by(user_phone=sender_phone).order_by(Conversation.created_at.desc()).first()
+        
+        # --- INICIO DE CORRECCIÓN CRÍTICA ---
+        # Si el usuario escribe 'A' y el chat está abierto, lo pasamos al menú IA.
+        if existing_convo and existing_convo.status == 'open' and message_body.strip().upper() == 'A':
+            logging.info(f"Usuario {sender_phone} escribió 'A'. Devolviendo al menú principal.")
+            
+            # Cambiar estado a IA para forzar la respuesta del menú
+            existing_convo.status = 'ia_show_menu'
+            existing_convo.unread_count = 0 # Marcar como leído
+            existing_convo.pending_counted = False # Reiniciar contador
+            
+            # Buscamos el nombre para darle un saludo personalizado
+            display_name = existing_convo.user_display_name or existing_convo.user_phone.split('@')[0].replace('whatsapp:', '').replace('+', '')
+            
+            # Enviamos el mensaje del menú principal
+            menu_message = _get_main_menu(display_name)
+            send_reply(sender_phone, menu_message)
+
+            # Guardar mensaje del usuario (la 'A') y la respuesta del sistema
+            user_msg = Message(conversation_id=existing_convo.id, sender_type='user', content=message_body)
+            system_msg = Message(conversation_id=existing_convo.id, sender_type='system', content=menu_message)
+            db.session.add_all([user_msg, system_msg])
+
+            existing_convo.updated_at = datetime.utcnow()
+            db.session.commit()
+            return jsonify({"status": "returned_to_menu"}), 200
+        
+        # Si el chat está abierto pero NO escribió 'A', se procesa para el agente.
         if existing_convo and existing_convo.status == 'open':
             logging.info(f"Conversación ABIERTA (ID: {existing_convo.id}) encontrada para {sender_phone}. Enviando a agente.")
             new_message = Message(conversation_id=existing_convo.id, sender_type='user', content=message_body)
@@ -687,6 +715,7 @@ def baileys_webhook():
                 existing_convo.pending_counted = True
             db.session.commit()
             return jsonify({"status": "message_queued"}), 200
+        # --- FIN DE CORRECCIÓN CRÍTICA ---
 
         bot_config = BotConfig.query.first()
         if not bot_config or not bot_config.is_active:
