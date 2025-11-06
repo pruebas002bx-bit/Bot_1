@@ -414,12 +414,13 @@ def _get_cotizaciones_menu():
 # Función que define la respuesta y acción para opciones que enrutan (1, 3, 4, 5, 6, 7)
 def _get_agent_response_and_role(option):
     mapeo_roles = {
-        "1": "Siniestros, Consultas Póliza, Cancelaciones", 
-        "3": "Ventas", 
-        "4": "Siniestros, Consultas Póliza, Cancelaciones",
-        "5": "Siniestros, Consultas Póliza, Cancelaciones",
-        "6": "Siniestros, Consultas Póliza, Cancelaciones",
-        "7": "Soporte Técnico"
+        "1": "Presentas un accidente o requieres asistencia", 
+        "2": "Requieres una cotización.", 
+        "3": "Continuar con proceso de compra", 
+        "4": "Inquietudes de tu póliza, certificados, coberturas, pagos y renovaciones.",
+        "5": "Consultar estado de siniestro/Financiaciones y pagos",
+        "6": "Solicitud de cancelación de póliza y reintegro de dinero.",
+        "7": "Comunicarse directamente con asesor por motivo de quejas y peticiones."
     }
     
     response_parts = []
