@@ -164,7 +164,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         const resolved = Number(role.chats_resolved) || 0;
 
         // --- INICIO CORRECCIÓN ---
-        // Se eliminan los comentarios { /* ... */ }
+        // Se eliminan los comentarios { /* ... */ } que rompían el JS.
         return `
             <div class="role-card" data-id="${role.id}">
                 <div class="card-header">

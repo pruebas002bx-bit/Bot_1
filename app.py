@@ -4,6 +4,7 @@ import re
 import json
 import requests
 import pandas as pd
+import random  # <-- AÑADIDO PARA BALANCEO
 from flask import Flask, render_template, request, jsonify, redirect, url_for
 from werkzeug.utils import secure_filename 
 from flask_sqlalchemy import SQLAlchemy
@@ -380,6 +381,32 @@ def send_reply(phone_number, message_content):
         return False
 
 
+# --- INICIO DE NUEVA FUNCIÓN DE BALANCEO ---
+def get_random_active_role(base_role_title):
+    """
+    Busca todos los roles activos que coincidan con un título base (ej. "Rol" o "Rol_2")
+    y devuelve uno al azar para balanceo de carga.
+    """
+    logging.info(f"Balanceo de carga: Buscando roles activos para la base: '{base_role_title}'")
+    
+    possible_roles = BotRole.query.filter(
+        or_(
+            BotRole.title == base_role_title,
+            BotRole.title.like(f"{base_role_title}_%")
+        ),
+        BotRole.status == 'Activo'
+    ).all()
+    
+    if not possible_roles:
+        logging.warning(f"Balanceo de carga: No se encontraron roles activos que coincidan con la base '{base_role_title}'.")
+        return None
+        
+    target_role = random.choice(possible_roles)
+    logging.info(f"Balanceo de carga: Roles encontrados: {[r.title for r in possible_roles]}. Rol seleccionado aleatoriamente: '{target_role.title}'")
+    return target_role
+# --- FIN DE NUEVA FUNCIÓN DE BALANCEO ---
+
+
 # --- MÁQUINA DE ESTADOS (Funciones Anidadas) ---
 
 # Función para obtener el menú principal (con formato)
@@ -534,6 +561,8 @@ def _get_cotizacion_detail(sub_option):
     return ""
 
 
+# --- FUNCIÓN PRINCIPAL DE LA MÁQUINA DE ESTADOS ---
+# CORREGIDO: Se re-integra el bloque try/except con la indentación correcta.
 def get_ia_response_and_route(convo, message_body):
     """
     Gestiona la conversación de la IA como una máquina de estados.
@@ -828,10 +857,16 @@ def baileys_webhook():
         
         if action == "route":
             role_title = data
-            target_role = BotRole.query.filter_by(title=role_title, status='Activo').first()
+            
+            # --- INICIO DE LÓGICA DE BALANCEO ---
+            # target_role = BotRole.query.filter_by(title=role_title, status='Activo').first()
+            target_role = get_random_active_role(role_title)
+            # --- FIN DE LÓGICA DE BALANCEO ---
             
             if not target_role:
-                logging.error(f"IA enrutó a '{role_title}' pero no se encontró o está inactivo.")
+                # --- MODIFICACIÓN DE LOG ---
+                logging.error(f"IA enrutó a '{role_title}' pero no se encontró ningún rol activo (ni base ni duplicados).")
+                # --- FIN DE MODIFICACIÓN ---
                 ia_response_msg = f"Ups, el departamento de '{role_title}' no está disponible en este momento. ¿Puedo ayudarte con algo más?"
                 send_reply(sender_phone, ia_response_msg)
                 ia_msg_db = Message(conversation_id=convo.id, sender_type='system', content=ia_response_msg)
@@ -839,7 +874,7 @@ def baileys_webhook():
                 db.session.commit()
                 return jsonify({"status": "route_failed"}), 200
             
-            logging.info(f"IA enrutó chat {convo.id} a '{target_role.title}'. Cambiando status a 'open'.")
+            logging.info(f"IA enrutó chat {convo.id} a '{target_role.title}' (Rol seleccionado: {target_role.title}). Cambiando status a 'open'.")
             convo.status = 'open'
             convo.bot_role_id = target_role.id
             convo.pending_counted = True
@@ -855,11 +890,14 @@ def baileys_webhook():
             db.session.add_all([system_msg_db, ia_msg_db])
             
         elif action == "route_and_message":
-            # Nuevo tipo de acción: Enviar mensaje detallado Y luego enrutar (Opciones 1, 3, 4, 5, 6, 7 y 2.4)
+            # (Este bloque ya no se usa para enrutar, pero se mantiene la lógica de balanceo por si acaso)
             role_title = data['role']
             full_response = data['message'] # Es la respuesta completa con formato
             
-            target_role = BotRole.query.filter_by(title=role_title, status='Activo').first()
+            # --- INICIO DE LÓGICA DE BALANCEO ---
+            # target_role = BotRole.query.filter_by(title=role_title, status='Activo').first()
+            target_role = get_random_active_role(role_title)
+            # --- FIN DE LÓGICA DE BALANCEO ---
 
             # 1. Enviar mensaje detallado al usuario
             send_reply(sender_phone, full_response)
@@ -869,13 +907,14 @@ def baileys_webhook():
             db.session.add(ia_msg_db)
             
             if not target_role:
-                logging.error(f"IA intentó enrutar a '{role_title}' pero no se encontró o está inactivo.")
-                # Si falla el ruteo, no cambiar estado, solo notificar.
+                # --- MODIFICACIÓN DE LOG ---
+                logging.error(f"IA intentó enrutar a '{role_title}' pero no se encontró ningún rol activo (ni base ni duplicados).")
+                # --- FIN DE MODIFICACIÓN ---
                 db.session.commit() 
                 return jsonify({"status": "route_and_message_failed"}), 200
 
             # 3. Enrutar y cambiar estado a 'open'
-            logging.info(f"IA envió mensaje y enrutó chat {convo.id} a '{target_role.title}'. Cambiando status a 'open'.")
+            logging.info(f"IA envió mensaje y enrutó chat {convo.id} a '{target_role.title}' (Rol seleccionado: {target_role.title}). Cambiando status a 'open'.")
             convo.status = 'open'
             convo.bot_role_id = target_role.id
             convo.pending_counted = True
@@ -1416,16 +1455,22 @@ def init_db(app_instance):
                 logging.info("Creando rol por defecto: 'General'")
                 db.session.add(BotRole(title='General', knowledge_base='Preguntas frecuentes o chat inicial.', status='Activo'))
 
-            roles_default = {
-                "Area Cotizaciones": "Es el cotizador de negocios...", "Renovaciones": "De manera proactiva...",
-                "Agente de ventas/Comercial #1": "Este módulo actúa como...", "Agente de ventas/Comercial #2": "Módulo de primer contacto...",
-                "Agente de ventas/Comercial #3": "Módulo de primer contacto...", "Siniestros, Consultas Póliza, Cancelaciones": "Diseñado para asistir...",
-                "Ventas": "Consultas sobre compra...", "Soporte Técnico": "Problemas con la plataforma..."
-            }
-            for title, knowledge in roles_default.items():
+            # --- CORRECCIÓN DE ROLES DEFAULT ---
+            # Asegurarse que los roles base del flujo IA existan.
+            roles_default_ia = [
+                "Presentas un accidente o requieres asistencia",
+                "Requieres una cotización",
+                "Continuar con proceso de compra",
+                "Inquietudes de tu póliza, certificados, coberturas, pagos y renovaciones",
+                "Consultar estado de siniestro/Financiaciones y pagos",
+                "Solicitud de cancelación de póliza y reintegro de dinero",
+                "Comunicarse directamente con asesor por motivo de quejas y peticiones"
+            ]
+            
+            for title in roles_default_ia:
                 if not BotRole.query.filter_by(title=title).first():
-                    logging.info(f"Creando rol por defecto: '{title}'")
-                    db.session.add(BotRole(title=title, knowledge_base=knowledge))
+                    logging.info(f"Creando rol por defecto (del flujo IA): '{title}'")
+                    db.session.add(BotRole(title=title, knowledge_base=f'Rol para manejar la opción: {title}', status='Activo'))
             
             db.session.commit()
         except Exception as e:
