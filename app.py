@@ -534,8 +534,6 @@ def _get_cotizacion_detail(sub_option):
     return ""
 
 
-# --- FUNCIÓN PRINCIPAL DE LA MÁQUINA DE ESTADOS ---
-# CORREGIDO: Se re-integra el bloque try/except con la indentación correcta.
 def get_ia_response_and_route(convo, message_body):
     """
     Gestiona la conversación de la IA como una máquina de estados.
@@ -612,11 +610,19 @@ def get_ia_response_and_route(convo, message_body):
                 db.session.add(convo)
                 return ("chat", _get_cotizaciones_menu())
             
+            # --- INICIO DE CORRECCIÓN (Lógica para opciones 1, 3, 4, 5, 6, 7) ---
             elif opcion in ['1', '3', '4', '5', '6', '7']:
-                # Opción 1, 3, 4, 5, 6, 7: Enviar mensaje detallado y luego ENRUTAR
-                role, response_msg = _get_agent_response_and_role(opcion)
-                # La acción 'route_and_message' indica a webhook que envíe el mensaje Y ENRUTE.
-                return ("route_and_message", {"role": role, "message": response_msg})
+                # Mover a un estado de espera después de enviar el mensaje.
+                
+                role_name, response_msg = _get_agent_response_and_role(opcion)
+                
+                # Asignamos un estado de espera específico que guarda la intención
+                convo.status = f'ia_wait_for_info_opcion_{opcion}' 
+                db.session.add(convo)
+                
+                # Retornamos solo la acción 'chat' con el mensaje de solicitud de info
+                return ("chat", response_msg)
+            # --- FIN DE CORRECCIÓN ---
             
             else:
                 return ("chat", f"La opción *'{opcion}'* no es válida. Por favor, selecciona un número del 1 al 7.\n\n" + _get_main_menu(convo.user_display_name))
@@ -640,15 +646,51 @@ def get_ia_response_and_route(convo, message_body):
                 convo.status = 'ia_cotizaciones_empresa'
                 db.session.add(convo)
                 return ("chat", _get_cotizacion_detail('3'))
+            
+            # --- INICIO DE CORRECCIÓN (Lógica para opción 2.4) ---
             elif sub_opcion == '4':
-                # --- CORRECCIÓN LÓGICA DE ROL ---
-                # Vida/Salud/Otros: Dar respuesta y ENRUTAR a agente (Cotizaciones)
+                # Mover a un estado de espera, igual que las opciones 1, 3-7
                 response_msg = _get_cotizacion_detail('4')
-                return ("route_and_message", {"role": "Requieres una cotización", "message": response_msg})
-                # --- FIN DE CORRECCIÓN ---
+                convo.status = 'ia_wait_for_info_opcion_2_4' # Estado específico para Cotizaciones (op 2, sub-op 4)
+                db.session.add(convo)
+                return ("chat", response_msg)
+            # --- FIN DE CORRECCIÓN ---
+            
             else:
                 # Opción inválida, repetir el sub-menú
                 return ("chat", f"La opción *'{sub_opcion}'* no es válida. Por favor, selecciona un número del 1 al 4.\n\n" + _get_cotizaciones_menu())
+
+        # --- INICIO DE NUEVO BLOQUE DE ESTADOS DE ESPERA ---
+        # --- ESTADO 7: Esperando información para enrutar (Placa, motivo, etc.) ---
+        elif convo.status.startswith('ia_wait_for_info_opcion_'):
+            # El usuario ha escrito la información solicitada (ej. la placa, el motivo de cancelación)
+            # que NO es 'A' (porque 'A' se captura al inicio de la función).
+            # Ahora debemos enrutar al agente.
+            
+            role_name = "General" # Fallback
+            
+            if convo.status == 'ia_wait_for_info_opcion_1':
+                role_name, _ = _get_agent_response_and_role('1')
+            elif convo.status == 'ia_wait_for_info_opcion_3':
+                role_name, _ = _get_agent_response_and_role('3')
+            elif convo.status == 'ia_wait_for_info_opcion_4':
+                role_name, _ = _get_agent_response_and_role('4') # <-- Tu caso
+            elif convo.status == 'ia_wait_for_info_opcion_5':
+                role_name, _ = _get_agent_response_and_role('5')
+            elif convo.status == 'ia_wait_for_info_opcion_6':
+                role_name, _ = _get_agent_response_and_role('6')
+            elif convo.status == 'ia_wait_for_info_opcion_7':
+                role_name, _ = _get_agent_response_and_role('7')
+            elif convo.status == 'ia_wait_for_info_opcion_2_4':
+                # Este es el caso especial de Cotizaciones -> Vida/Salud
+                role_name = "Requieres una cotización"
+
+            # Enrutamos al rol correspondiente.
+            # La acción 'route' hará que el webhook cambie convo.status a 'open'
+            # y el mensaje del usuario (message_body) ya se habrá guardado 
+            # en la BD por el webhook antes de llamar a esta función.
+            return ("route", role_name)
+        # --- FIN DE NUEVO BLOQUE ---
 
         # --- ESTADOS FINALES DE COTIZACIÓN (Solo esperan 'A' o enrutan) ---
         elif convo.status in ['ia_cotizaciones_autos', 'ia_cotizaciones_hogar', 'ia_cotizaciones_empresa']:
