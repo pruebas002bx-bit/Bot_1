@@ -806,14 +806,13 @@ def baileys_webhook():
             db.session.commit()
             return jsonify({"status": "returned_to_menu"}), 200
         
-        # Si el chat está abierto pero NO escribió 'A', se procesa para el agente.
         if existing_convo and existing_convo.status == 'open':
             logging.info(f"Conversación ABIERTA (ID: {existing_convo.id}) encontrada para {sender_phone}. Enviando a agente.")
             
-
+            # --- INICIO DE CORRECCIÓN ---
             new_message = Message(conversation_id=existing_convo.id, sender_type='user', content=message_body, message_type=message_type, media_url=media_url)
-
-
+            db.session.add(new_message) # <-- AÑADIR ESTA LÍNEA
+            # --- FIN DE CORRECCIÓN ---
 
             existing_convo.unread_count = (existing_convo.unread_count or 0) + 1
             existing_convo.updated_at = datetime.utcnow()
@@ -830,13 +829,13 @@ def baileys_webhook():
             logging.info("Bot inactivo. Ignorando mensaje.")
             return jsonify({"status": "bot_inactive"}), 200
         
-        # Escenario B: Chat en CUALQUIER fase de IA ('ia_greeting', 'ia_ask_name', etc.)
         if existing_convo and existing_convo.status.startswith('ia_'):
             logging.info(f"Continuando chat IA (ID: {existing_convo.id}, Estado: {existing_convo.status})")
             convo = existing_convo
             
             # Guardar el mensaje del usuario (ej. "Juan Perez", "sí", "1")
             user_msg = Message(conversation_id=convo.id, sender_type='user', content=message_body, message_type=message_type, media_url=media_url)
+            db.session.add(user_msg) # <-- AÑADIR ESTA LÍNEA
             
             # Obtener la respuesta de la máquina de estados
             action, data = get_ia_response_and_route(convo, message_body)
@@ -872,6 +871,7 @@ def baileys_webhook():
             
             # Guardar el primer mensaje del usuario (ej. "Hola")
             user_msg = Message(conversation_id=convo.id, sender_type='user', content=message_body, message_type=message_type, media_url=media_url)
+            db.session.add(user_msg) # <-- AÑADIR ESTA LÍNEA
             
             # Obtener la respuesta de la máquina de estados
             action, data = get_ia_response_and_route(convo, message_body)
