@@ -591,44 +591,55 @@ def get_ia_response_and_route(convo, message_body):
             db.session.add(convo)
             return ("chat", _get_main_menu(convo.user_display_name))
 
-        # --- ESTADO 1: Saludo Inicial ('ia_greeting') ---
+        # --- ESTADO 1: Saludo Inicial y Petición de Datos ('ia_greeting') ---
         elif convo.status == 'ia_greeting':
-            convo.status = 'ia_ask_name' 
+            convo.status = 'ia_wait_for_details' # Nuevo estado de espera
             db.session.add(convo)
-            return ("chat", "¡Hola! Bienvenido a *VTN SEGUROS - Grupo Montenegro*. Para nosotros es un gusto atenderte. Por favor indícame tu *nombre completo*.")
-        
-        # --- ESTADO 2: Esperando el Nombre ('ia_ask_name') ---
-        elif convo.status == 'ia_ask_name':
-            convo.user_display_name = message_body.strip() 
-            convo.status = 'ia_ask_phone' 
-            db.session.add(convo)
-            return ("chat", f"Gracias *{convo.user_display_name}*. Ahora, por favor, indícame tu *número de celular*.")
-
-        # --- ESTADO 3: Esperando el Teléfono ('ia_ask_phone') ---
-        elif convo.status == 'ia_ask_phone':
-            convo.user_reported_phone = message_body.strip()
-            convo.status = 'ia_confirm_details' 
-            db.session.add(convo)
-            return ("chat", f"Tu nombre es *{convo.user_display_name}* y tu celular es el *{convo.user_reported_phone}*. ¿Es esto *correcto*? (Responde 'sí' o 'no')")
-
-        # --- ESTADO 4: Esperando Confirmación ('ia_confirm_details') ---
-        elif convo.status == 'ia_confirm_details':
-            respuesta_limpia = message_body.strip().lower()
             
-            if respuesta_limpia in ['sí', 'si', 's', 'correcto', 'si es']:
-                convo.status = 'ia_show_menu' 
+            # Nuevo mensaje unificado
+            welcome_msg = (
+                "¡Hola! Bienvenido a *VTN SEGUROS - Grupo Montenegro*. Para nosotros es un gusto atenderte.\n\n"
+                "Para brindarte un mejor servicio, por favor indícame tus datos en un *solo mensaje* siguiendo este formato:\n\n"
+                "*Tu Nombre Completo, Tu Celular, Placa de tu vehículo* (si aplica)\n\n"
+                "Por ejemplo:\n"
+                "```Juan Perez, 3001234567, ABC123```\n"
+                "O si no tienes vehículo:\n"
+                "```Maria Lopez, 3109876543```\n\n"
+                "*(Usa comas ',' para separar los datos, por favor)*"
+            )
+            return ("chat", welcome_msg)
+        
+
+        # --- ESTADO 2: Esperando los detalles unificados ('ia_wait_for_details') ---
+        elif convo.status == 'ia_wait_for_details':
+            # Separar el input del usuario por comas
+            parts = [p.strip() for p in message_body.strip().split(',')]
+            
+            # Verificar si el formato es mínimamente correcto (Nombre y Celular)
+            if len(parts) >= 2:
+                # El formato es correcto, guardamos los datos
+                convo.user_display_name = parts[0]
+                convo.user_reported_phone = parts[1]
+                # La placa (parts[2]), si existe, quedará registrada en el historial del chat
+                
+                convo.status = 'ia_show_menu' # Avanzar al menú principal
                 db.session.add(convo)
+                
+                # Devolver el menú principal
                 return ("chat", _get_main_menu(convo.user_display_name))
             
-            elif respuesta_limpia in ['no', 'n', 'incorrecto']:
-                convo.status = 'ia_ask_name'
-                convo.user_display_name = None 
-                convo.user_reported_phone = None 
-                db.session.add(convo)
-                return ("chat", "Entendido, empecemos de nuevo. Por favor indícame tu *nombre completo*.")
-            
             else:
-                return ("chat", f"No entendí tu respuesta. Por favor, dime *'sí'* o *'no'*.\n\n¿Tus datos son correctos?\nNombre: *{convo.user_display_name}*\nCelular: *{convo.user_reported_phone}*")
+                # El formato es incorrecto, volver a pedir
+                # El estado no cambia, se mantiene en 'ia_wait_for_details'
+                
+                retry_msg = (
+                    "No pude entender tus datos. 😟 Por favor, asegúrate de usar el formato correcto, separando cada dato con una *coma* (',').\n\n"
+                    "Formato:\n"
+                    "*Tu Nombre Completo, Tu Celular, Placa de tu vehículo* (si aplica)\n\n"
+                    "Por ejemplo:\n"
+                    "```Juan Perez, 3001234567, ABC123```"
+                )
+                return ("chat", retry_msg)
 
         # --- ESTADO 5: Mostrando el Menú (Esperando opción 1-7) ('ia_show_menu') ---
         elif convo.status == 'ia_show_menu':
