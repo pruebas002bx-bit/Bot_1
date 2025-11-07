@@ -1041,6 +1041,61 @@ def get_chat_messages(convo_id):
     messages = [{"sender": msg.sender_type, "text": msg.content} for msg in convo.messages]
     return jsonify(messages)
 
+
+# --- NUEVA: API PARA BUSCAR DATOS DE PÓLIZA ASOCIADOS AL CHAT ---
+@app.route('/api/chats/<int:convo_id>/search_policy_data', methods=['GET'])
+@login_required
+def search_policy_data_for_chat(convo_id):
+    convo = Conversation.query.get_or_404(convo_id)
+    
+    # Verificar permisos
+    if current_user.role != 'Admin':
+        assigned_role_ids = [role.id for role in current_user.assigned_roles]
+        if convo.bot_role_id not in assigned_role_ids:
+            return jsonify({"error": "No autorizado para este chat"}), 403
+            
+    # Usar el 'user_display_name' guardado en la conversación
+    search_name = convo.user_display_name
+    
+    if not search_name:
+        logging.warning(f"Intento de búsqueda de póliza para chat {convo_id} sin user_display_name.")
+        return jsonify([]) # Devolver lista vacía si no hay nombre para buscar
+
+    try:
+        search_pattern = f"%{search_name}%"
+        logging.info(f"Buscando en PolicyData por nombre: {search_pattern}")
+        
+        # Busca cualquier nombre que 'contenga' el nombre del chat
+        records = PolicyData.query.filter(
+            PolicyData.nombres.ilike(search_pattern)
+        ).order_by(PolicyData.nombres).all()
+        
+        results = [
+            {
+                "aseguradora": r.aseguradora,
+                "nombres": r.nombres,
+                "cedula_nit": r.cedula_nit,
+                "tipo": r.tipo,
+                "placa": r.placa,
+                "modelo": r.modelo,
+                "valor_poliza": r.valor_poliza,
+                "mes_vencimiento": r.mes_vencimiento,
+                "fecha_venc": r.fecha_venc,
+                "referencia": r.referencia
+            } for r in records
+        ]
+        
+        logging.info(f"Búsqueda para '{search_pattern}' encontró {len(results)} registros.")
+        return jsonify(results)
+        
+    except Exception as e:
+        logging.error(f"Error en /api/chats/{convo_id}/search_policy_data: {e}")
+        return jsonify({"error": str(e)}), 500
+# --- FIN DE NUEVA API ---
+
+
+
+
 # --- FUNCIÓN DE ENVÍO DE MENSAJES (Agente Humano) ---
 # (Esta función ya era correcta para la arquitectura de Baileys)
 @app.route('/api/chats/<int:convo_id>/messages', methods=['POST'])
