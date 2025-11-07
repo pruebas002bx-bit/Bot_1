@@ -128,6 +128,12 @@ class Message(db.Model):
     sender_type = db.Column(db.String(20), nullable=False) # 'user', 'agent', 'system'
     content = db.Column(db.Text, nullable=False)
     timestamp = db.Column(db.DateTime(timezone=True), server_default=func.now())
+    
+    # --- NUEVAS COLUMNAS PARA MULTIMEDIA ---
+    message_type = db.Column(db.String(20), default='text', nullable=False) # 'text', 'image', 'video'
+    media_url = db.Column(db.String(1024), nullable=True) # URL pública del archivo
+    # --- FIN DE NUEVAS COLUMNAS ---
+
     conversation = db.relationship('Conversation', back_populates='messages')
 
 # --- PolicyData (Base de Datos de Pólizas) ---
@@ -759,10 +765,14 @@ def baileys_webhook():
     data = request.json
     message_body = data.get('Body')
     sender_phone = data.get('From')
-    
-    if not message_body or not sender_phone:
-        logging.warning("Webhook (Baileys) recibido sin 'Body' o 'From'.")
-        return jsonify({"error": "Faltan 'Body' o 'From'"}), 400
+    message_type = data.get('MessageType', 'text')
+    media_url = data.get('MediaUrl')
+
+
+
+    if (not message_body and not media_url) or not sender_phone:
+        logging.warning("Webhook (Baileys) recibido sin 'Body' o 'MediaUrl', o sin 'From'.")
+        return jsonify({"error": "Faltan 'Body'/'MediaUrl' o 'From'"}), 400
         
     logging.info(f"Mensaje (Baileys) recibido de {sender_phone}: {message_body}")
 
@@ -799,8 +809,12 @@ def baileys_webhook():
         # Si el chat está abierto pero NO escribió 'A', se procesa para el agente.
         if existing_convo and existing_convo.status == 'open':
             logging.info(f"Conversación ABIERTA (ID: {existing_convo.id}) encontrada para {sender_phone}. Enviando a agente.")
-            new_message = Message(conversation_id=existing_convo.id, sender_type='user', content=message_body)
-            db.session.add(new_message)
+            
+
+            new_message = Message(conversation_id=existing_convo.id, sender_type='user', content=message_body, message_type=message_type, media_url=media_url)
+
+
+
             existing_convo.unread_count = (existing_convo.unread_count or 0) + 1
             existing_convo.updated_at = datetime.utcnow()
             role = existing_convo.bot_role
@@ -822,8 +836,7 @@ def baileys_webhook():
             convo = existing_convo
             
             # Guardar el mensaje del usuario (ej. "Juan Perez", "sí", "1")
-            user_msg = Message(conversation_id=convo.id, sender_type='user', content=message_body)
-            db.session.add(user_msg)
+            user_msg = Message(conversation_id=convo.id, sender_type='user', content=message_body, message_type=message_type, media_url=media_url)
             
             # Obtener la respuesta de la máquina de estados
             action, data = get_ia_response_and_route(convo, message_body)
@@ -858,8 +871,7 @@ def baileys_webhook():
             db.session.flush() # Para obtener el convo.id
             
             # Guardar el primer mensaje del usuario (ej. "Hola")
-            user_msg = Message(conversation_id=convo.id, sender_type='user', content=message_body)
-            db.session.add(user_msg)
+            user_msg = Message(conversation_id=convo.id, sender_type='user', content=message_body, message_type=message_type, media_url=media_url)
             
             # Obtener la respuesta de la máquina de estados
             action, data = get_ia_response_and_route(convo, message_body)
@@ -1038,7 +1050,18 @@ def get_chat_messages(convo_id):
         
     db.session.commit()
     
-    messages = [{"sender": msg.sender_type, "text": msg.content} for msg in convo.messages]
+    # --- MODIFICADO: Enviar tipo de mensaje y URL ---
+    messages = [
+        {
+            "sender": msg.sender_type, 
+            "text": msg.content, 
+            "type": msg.message_type, 
+            "url": msg.media_url
+        } 
+        for msg in convo.messages
+    ]
+    # --- FIN DE MODIFICACIÓN ---
+    
     return jsonify(messages)
 
 

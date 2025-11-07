@@ -234,14 +234,47 @@ document.addEventListener('DOMContentLoaded', () => {
             const messageArea = document.getElementById('message-area');
             if (!messageArea) return;
 
+            // --- INICIO DE MODIFICACIÓN: Renderizado de Multimedia ---
             messageArea.innerHTML = messages.map(msg => {
                 let bubbleClass = '';
                 if (msg.sender === 'agent') bubbleClass = 'sent';
                 else if (msg.sender === 'user') bubbleClass = 'received';
-                else if (msg.sender === 'system') bubbleClass = 'system'; // Mensajes de IA y Sistema
-                return `<div class="message-bubble ${bubbleClass}">${msg.text}</div>`;
-            }).join('');
+                else if (msg.sender === 'system') bubbleClass = 'system';
 
+                let contentHtml = '';
+                let hasMedia = false;
+                
+                // 1. Renderizar Media si existe
+                if (msg.type === 'image' && msg.url) {
+                    contentHtml = `<img src="${msg.url}" alt="Imagen adjunta" style="max-width: 100%; max-height: 300px; border-radius: 5px; cursor: pointer;" onclick="window.open('${msg.url}', '_blank')">`;
+                    hasMedia = true;
+                } else if (msg.type === 'video' && msg.url) {
+                    contentHtml = `<video controls style="max-width: 100%; max-height: 300px; border-radius: 5px;">
+                                     <source src="${msg.url}" type="video/mp4">
+                                     Tu navegador no soporta el video.
+                                   </video>`;
+                    hasMedia = true;
+                }
+                
+                // 2. Renderizar Texto/Caption
+                // (No mostrar el texto si es solo un placeholder de media)
+                const isPlaceholder = (msg.text === '[Imagen Adjunta]' || msg.text === '[Video Adjunto]');
+
+                if (msg.text && !(hasMedia && isPlaceholder)) {
+                    // Añadir caption debajo del medio, o solo mostrar el texto
+                    contentHtml += `<div style="margin-top: ${hasMedia ? '5px' : '0'}; white-space: pre-wrap;">${msg.text}</div>`;
+                }
+
+                // Manejar mensajes de sistema (que siempre son solo texto)
+                if (bubbleClass === 'system') {
+                    contentHtml = msg.text;
+                }
+                
+                return `<div class="message-bubble ${bubbleClass}">${contentHtml}</div>`;
+            }).join('');
+            // --- FIN DE MODIFICACIÓN ---
+
+            // Auto-scroll
             const shouldScroll = messageArea.scrollHeight - messageArea.scrollTop <= messageArea.clientHeight + 200;
             if (shouldScroll) {
                 messageArea.scrollTop = messageArea.scrollHeight;
