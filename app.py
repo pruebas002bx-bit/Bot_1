@@ -567,8 +567,6 @@ def _get_cotizacion_detail(sub_option):
     return ""
 
 
-# --- FUNCIÓN PRINCIPAL DE LA MÁQUINA DE ESTADOS ---
-# CORREGIDO: Se re-integra el bloque try/except con la indentación correcta.
 def get_ia_response_and_route(convo, message_body):
     """
     Gestiona la conversación de la IA como una máquina de estados.
@@ -580,7 +578,7 @@ def get_ia_response_and_route(convo, message_body):
         # -----------------------------------------------------
         # --- LÓGICA DE REGRESO AL MENÚ PRINCIPAL ('A') ---
         # -----------------------------------------------------
-        if convo.status.startswith('ia_') and convo.status not in ['ia_greeting', 'ia_ask_name', 'ia_ask_phone', 'ia_confirm_details'] and message_body.strip().upper() == 'A':
+        if convo.status.startswith('ia_') and convo.status not in ['ia_greeting', 'ia_wait_for_client_type'] and message_body.strip().upper() == 'A':
             logging.info(f"Usuario {convo.user_phone} solicitó volver al menú principal desde {convo.status}.")
             convo.status = 'ia_show_menu' 
             db.session.add(convo)
@@ -593,59 +591,67 @@ def get_ia_response_and_route(convo, message_body):
 
         # --- ESTADO 0: Saludo (Usuario Conocido) ('ia_greeting_known') ---
         if convo.status == 'ia_greeting_known':
-            convo.status = 'ia_show_menu' 
+            # Cambiado para que los conocidos también vean el menú 1 o 2
+            convo.status = 'ia_greeting' 
             db.session.add(convo)
-            return ("chat", _get_main_menu(convo.user_display_name))
+            # El mensaje se genera en el estado 'ia_greeting'
 
         # --- ESTADO 1: Saludo Inicial y Petición de Datos ('ia_greeting') ---
         elif convo.status == 'ia_greeting':
-            convo.status = 'ia_wait_for_details' # Nuevo estado de espera
+            convo.status = 'ia_wait_for_client_type' # Nuevo estado de espera simple
             db.session.add(convo)
             
-            # Nuevo mensaje unificado
+            # Nuevo mensaje de bienvenida con el menú 1 o 2
             welcome_msg = (
-                "¡Hola! Bienvenido a *VTN SEGUROS - Grupo Montenegro*. Para nosotros es un gusto atenderte.\n\n"
-                "Para brindarte un mejor servicio, por favor indícame tus datos en un *solo mensaje* siguiendo este formato:\n\n"
-                "*Tu Nombre Completo, Tu Celular, Placa de tu vehículo* (si aplica)\n\n"
-                "Por ejemplo:\n"
-                "```Juan Perez, 3001234567, ABC123```\n"
-                "O si no tienes vehículo:\n"
-                "```Maria Lopez, 3109876543```\n\n"
-                "*(Usa comas ',' para separar los datos, por favor)*"
+                "¡Hola! Bienvenido a *VTN SEGUROS - Grupo Montenegro*. Para nosotros es un gusto atenderte 🫡\n\n"
+                "Para iniciar, por favor escribe el *número* que te corresponda:\n\n"
+                "*1.* Ya soy cliente (o tengo póliza con VTN). ✅\n"
+                "*2.* Soy un usuario nuevo y deseo cotizar. 📊"
             )
             return ("chat", welcome_msg)
         
-
-        # --- ESTADO 2: Esperando los detalles unificados ('ia_wait_for_details') ---
-        elif convo.status == 'ia_wait_for_details':
-            # Separar el input del usuario por comas
-            parts = [p.strip() for p in message_body.strip().split(',')]
+        # --- NUEVO ESTADO: Esperando el tipo de cliente (1 o 2) ---
+        elif convo.status == 'ia_wait_for_client_type':
+            opcion = message_body.strip()
             
-            # Verificar si el formato es mínimamente correcto (Nombre y Celular)
-            if len(parts) >= 2:
-                # El formato es correcto, guardamos los datos
-                convo.user_display_name = parts[0]
-                convo.user_reported_phone = parts[1]
-                # La placa (parts[2]), si existe, quedará registrada en el historial del chat
-                
-                convo.status = 'ia_show_menu' # Avanzar al menú principal
+            # Opción 1: Cliente existente -> Menú Principal
+            if opcion == '1':
+                convo.status = 'ia_show_menu' 
+                db.session.add(convo)
+                return ("chat", _get_main_menu(convo.user_display_name))
+
+            # Opción 2: Usuario nuevo -> Sub-Menú de Cotizaciones
+            elif opcion == '2':
+                convo.status = 'ia_cotizaciones_sub' # Mover al sub-menú de cotizaciones
                 db.session.add(convo)
                 
-                # Devolver el menú principal
-                return ("chat", _get_main_menu(convo.user_display_name))
-            
-            else:
-                # El formato es incorrecto, volver a pedir
-                # El estado no cambia, se mantiene en 'ia_wait_for_details'
+                # Se envía un mensaje de bienvenida ANTES del menú de cotizaciones
+                msg_cotizacion = (
+                    "¡Entendido! Con gusto te ayudamos con tu cotización. "
+                    "Por favor, indica qué producto deseas cotizar a continuación.\n\n"
+                    + _get_cotizaciones_menu()
+                )
                 
+                return ("chat", msg_cotizacion)
+
+            else:
+                # Opción inválida: Repetir el menú 1/2
                 retry_msg = (
-                    "No pude entender tus datos. 😟 Por favor, asegúrate de usar el formato correcto, separando cada dato con una *coma* (',').\n\n"
-                    "Formato:\n"
-                    "*Tu Nombre Completo, Tu Celular, Placa de tu vehículo* (si aplica)\n\n"
-                    "Por ejemplo:\n"
-                    "```Juan Perez, 3001234567, ABC123```"
+                    "Opción no válida. Por favor, escribe *1* o *2*.\n\n"
+                    "*1.* Ya soy cliente (o tengo póliza con VTN). ✅\n"
+                    "*2.* Soy un usuario nuevo y deseo cotizar. 📊"
                 )
                 return ("chat", retry_msg)
+
+
+        # --- ESTADO 2: Esperando los detalles unificados ('ia_wait_for_details') ---
+        # ELIMINADO/IGNORADO en el nuevo flujo. Mantenido para evitar errores si se salta un estado.
+        elif convo.status == 'ia_wait_for_details':
+            # Si el chat llega a este estado (ej. un chat antiguo), lo reiniciamos al menú 1 o 2
+            convo.status = 'ia_greeting' 
+            db.session.add(convo)
+            return ("chat", "Reiniciando el menú principal. Por favor, escribe *1* o *2* para continuar:\n\n*1.* Ya soy cliente (o tengo póliza con VTN). ✅\n*2.* Soy un usuario nuevo y deseo cotizar. 📊")
+
 
         # --- ESTADO 5: Mostrando el Menú (Esperando opción 1-7) ('ia_show_menu') ---
         elif convo.status == 'ia_show_menu':
@@ -656,19 +662,12 @@ def get_ia_response_and_route(convo, message_body):
                 db.session.add(convo)
                 return ("chat", _get_cotizaciones_menu())
             
-            # --- INICIO DE CORRECCIÓN (Lógica para opciones 1, 3, 4, 5, 6, 7) ---
+            # --- Lógica para opciones 1, 3, 4, 5, 6, 7 ---
             elif opcion in ['1', '3', '4', '5', '6', '7']:
-                # Mover a un estado de espera después de enviar el mensaje.
-                
                 role_name, response_msg = _get_agent_response_and_role(opcion)
-                
-                # Asignamos un estado de espera específico que guarda la intención
                 convo.status = f'ia_wait_for_info_opcion_{opcion}' 
                 db.session.add(convo)
-                
-                # Retornamos solo la acción 'chat' con el mensaje de solicitud de info
                 return ("chat", response_msg)
-            # --- FIN DE CORRECCIÓN ---
             
             else:
                 return ("chat", f"La opción *'{opcion}'* no es válida. Por favor, selecciona un número del 1 al 7.\n\n" + _get_main_menu(convo.user_display_name))
@@ -678,49 +677,39 @@ def get_ia_response_and_route(convo, message_body):
             sub_opcion = message_body.strip()
             
             if sub_opcion == '1':
-                # Autos: Mover a estado de autos y dar respuesta
                 convo.status = 'ia_cotizaciones_autos'
                 db.session.add(convo)
                 return ("chat", _get_cotizacion_detail('1'))
             elif sub_opcion == '2':
-                # Hogar: Mover a estado de hogar y dar respuesta
                 convo.status = 'ia_cotizaciones_hogar'
                 db.session.add(convo)
                 return ("chat", _get_cotizacion_detail('2'))
             elif sub_opcion == '3':
-                # Empresa: Mover a estado de empresa y dar respuesta
                 convo.status = 'ia_cotizaciones_empresa'
                 db.session.add(convo)
                 return ("chat", _get_cotizacion_detail('3'))
             
-            # --- INICIO DE CORRECCIÓN (Lógica para opción 2.4) ---
             elif sub_opcion == '4':
-                # Mover a un estado de espera, igual que las opciones 1, 3-7
                 response_msg = _get_cotizacion_detail('4')
-                convo.status = 'ia_wait_for_info_opcion_2_4' # Estado específico para Cotizaciones (op 2, sub-op 4)
+                convo.status = 'ia_wait_for_info_opcion_2_4'
                 db.session.add(convo)
                 return ("chat", response_msg)
-            # --- FIN DE CORRECCIÓN ---
             
             else:
                 # Opción inválida, repetir el sub-menú
                 return ("chat", f"La opción *'{sub_opcion}'* no es válida. Por favor, selecciona un número del 1 al 4.\n\n" + _get_cotizaciones_menu())
 
-        # --- INICIO DE NUEVO BLOQUE DE ESTADOS DE ESPERA ---
         # --- ESTADO 7: Esperando información para enrutar (Placa, motivo, etc.) ---
         elif convo.status.startswith('ia_wait_for_info_opcion_'):
-            # El usuario ha escrito la información solicitada (ej. la placa, el motivo de cancelación)
-            # que NO es 'A' (porque 'A' se captura al inicio de la función).
-            # Ahora debemos enrutar al agente.
             
-            role_name = "General" # Fallback
+            role_name = "General" 
             
             if convo.status == 'ia_wait_for_info_opcion_1':
                 role_name, _ = _get_agent_response_and_role('1')
             elif convo.status == 'ia_wait_for_info_opcion_3':
                 role_name, _ = _get_agent_response_and_role('3')
             elif convo.status == 'ia_wait_for_info_opcion_4':
-                role_name, _ = _get_agent_response_and_role('4') # <-- Tu caso
+                role_name, _ = _get_agent_response_and_role('4')
             elif convo.status == 'ia_wait_for_info_opcion_5':
                 role_name, _ = _get_agent_response_and_role('5')
             elif convo.status == 'ia_wait_for_info_opcion_6':
@@ -728,31 +717,21 @@ def get_ia_response_and_route(convo, message_body):
             elif convo.status == 'ia_wait_for_info_opcion_7':
                 role_name, _ = _get_agent_response_and_role('7')
             elif convo.status == 'ia_wait_for_info_opcion_2_4':
-                # Este es el caso especial de Cotizaciones -> Vida/Salud
                 role_name = "Requieres una cotización"
 
-            # Enrutamos al rol correspondiente.
-            # La acción 'route' hará que el webhook cambie convo.status a 'open'
-            # y el mensaje del usuario (message_body) ya se habrá guardado 
-            # en la BD por el webhook antes de llamar a esta función.
             return ("route", role_name)
-        # --- FIN DE NUEVO BLOQUE ---
 
         # --- ESTADOS FINALES DE COTIZACIÓN (Solo esperan 'A' o enrutan) ---
         elif convo.status in ['ia_cotizaciones_autos', 'ia_cotizaciones_hogar', 'ia_cotizaciones_empresa']:
-            # --- CORRECCIÓN LÓGICA DE ROL ---
             # Cualquier otro mensaje en estos estados (que no sea 'A') debe enrutar a un agente de cotizaciones
             return ("route", "Requieres una cotización")
-            # --- FIN DE CORRECCIÓN ---
 
         # --- ESTADO FALLBACK (Por si acaso) ---
         else:
-            convo.status = 'ia_greeting' # Reiniciar
+            convo.status = 'ia_greeting' # Reiniciar al nuevo saludo 1 o 2
             db.session.add(convo)
-            return ("chat", "Parece que hubo un error. Empecemos de nuevo. ¡Hola! Bienvenido a *VTN SEGUROS*...")
+            return ("chat", "Parece que hubo un error. Empecemos de nuevo. ¡Hola! Bienvenido a *VTN SEGUROS*. Por favor, escribe *1* o *2* para continuar:\n\n*1.* Ya soy cliente (o tengo póliza con VTN). ✅\n*2.* Soy un usuario nuevo y deseo cotizar. 📊")
 
-    # --- BLOQUE 'EXCEPT' CORREGIDO ---
-    # Este bloque 'except' está ahora al mismo nivel de indentación que el 'try'
     except Exception as e:
         logging.error(f"Error en la máquina de estados de IA: {e}")
         # Fallback de seguridad: enrutar a General
