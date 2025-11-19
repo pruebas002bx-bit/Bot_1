@@ -4,7 +4,7 @@ import re
 import json
 import requests
 import pandas as pd
-import random
+import random  # <-- AÑADIDO PARA BALANCEO
 from flask import Flask, render_template, request, jsonify, redirect, url_for
 from werkzeug.utils import secure_filename 
 from flask_sqlalchemy import SQLAlchemy
@@ -13,11 +13,33 @@ from twilio.twiml.messaging_response import MessagingResponse
 from twilio.rest import Client
 from datetime import datetime, timedelta
 from sqlalchemy import func, or_
+
+# --- IMPORTACIONES DE SESIONES ---
 from flask_login import LoginManager, UserMixin, login_user, logout_user, login_required, current_user
 
 # --- CONFIGURACIÓN ---
 logging.basicConfig(level=logging.INFO)
 load_dotenv()
+
+# --- CONFIGURACIÓN DE TWILIO (Se mantiene por si se usa en el futuro, pero no para el webhook) ---
+TWILIO_ACCOUNT_SID = os.getenv('TWILIO_ACCOUNT_SID')
+TWILIO_AUTH_TOKEN = os.getenv('TWILIO_AUTH_TOKEN')
+TWILIO_WHATSAPP_NUMBER = os.getenv('TWILIO_WHATSAPP_NUMBER')
+try:
+    twilio_client = Client(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
+    logging.info("Cliente de Twilio inicializado (no se usará para webhook de Baileys).")
+except Exception as e:
+    logging.warning(f"No se pudo inicializar el cliente de Twilio: {e}.")
+    twilio_client = None
+
+# --- CONFIGURACIÓN DE IA (Mantenido aunque no se use en el flujo actual) ---
+try:
+    import google.generativeai as genai
+    genai.configure(api_key=os.getenv('GEMINI_API_KEY'))
+    logging.info("API de Gemini configurada.")
+except Exception as e:
+    logging.error(f"Error al configurar la API de Gemini: {e}.")
+    genai = None
 
 app = Flask(__name__, template_folder='templates')
 
@@ -44,7 +66,6 @@ def load_user(user_id):
     return User.query.get(int(user_id))
 
 # --- MODELOS DE LA BASE DE DATOS ---
-
 class User(db.Model, UserMixin):
     __tablename__ = 'users'
     id = db.Column(db.Integer, primary_key=True)
@@ -78,14 +99,16 @@ class Conversation(db.Model):
     __tablename__ = 'conversations'
     id = db.Column(db.Integer, primary_key=True)
     user_phone = db.Column(db.String(50), nullable=False, index=True)
-    status = db.Column(db.String(20), default='ia_greeting', nullable=False, index=True) 
+    status = db.Column(db.String(20), default='ia_greeting', nullable=False, index=True) # 'ia_greeting', 'open', 'closed'
     created_at = db.Column(db.DateTime(timezone=True), server_default=func.now())
     updated_at = db.Column(db.DateTime(timezone=True), onupdate=func.now())
     unread_count = db.Column(db.Integer, default=0)
     bot_role_id = db.Column(db.Integer, db.ForeignKey('bot_roles.id'), nullable=False)
     
+    # --- Nuevas Columnas para el Flujo de Nombre/Celular ---
     user_display_name = db.Column(db.String(120), nullable=True)
     user_reported_phone = db.Column(db.String(50), nullable=True)
+    # --------------------------------------------------------
     
     bot_role = db.relationship('BotRole', back_populates='conversations')
     messages = db.relationship('Message', back_populates='conversation', cascade="all, delete-orphan", order_by='Message.timestamp')
@@ -102,18 +125,18 @@ class Message(db.Model):
     __tablename__ = 'messages'
     id = db.Column(db.Integer, primary_key=True)
     conversation_id = db.Column(db.Integer, db.ForeignKey('conversations.id'), nullable=False)
-    
-    # RESTAURADO: Columnas que confirmaste que existen en BD
-    sender_type = db.Column(db.String(20), nullable=False, default='user') # 'user', 'agent', 'system'
+    sender_type = db.Column(db.String(20), nullable=False) # 'user', 'agent', 'system'
     content = db.Column(db.Text, nullable=False)
     timestamp = db.Column(db.DateTime(timezone=True), server_default=func.now())
     
-    # RESTAURADO: Columnas multimedia
+    # --- NUEVAS COLUMNAS PARA MULTIMEDIA ---
     message_type = db.Column(db.String(20), default='text', nullable=False) # 'text', 'image', 'video'
-    media_url = db.Column(db.String(1024), nullable=True) 
+    media_url = db.Column(db.String(1024), nullable=True) # URL pública del archivo
+    # --- FIN DE NUEVAS COLUMNAS ---
 
     conversation = db.relationship('Conversation', back_populates='messages')
 
+# --- PolicyData (Base de Datos de Pólizas) ---
 class PolicyData(db.Model):
     __tablename__ = 'policy_data'
     id = db.Column(db.Integer, primary_key=True)
@@ -127,10 +150,13 @@ class PolicyData(db.Model):
     mes_vencimiento = db.Column(db.String(100), nullable=True)
     fecha_venc = db.Column(db.String(100), nullable=True)
     referencia = db.Column(db.String(255), nullable=True)
+# --- FIN DE MODELOS ---
 
-# --- RUTAS BÁSICAS (FRONTEND) ---
+
+# --- RUTAS BÁSICAS (PROTEGIDAS) ---
 @app.route('/')
-def index(): return render_template('Index.html') 
+def index():
+    return render_template('Index.html') 
 
 @app.route('/menu_admin')
 @login_required
@@ -149,10 +175,13 @@ def menu_soporte():
 def show_page(page_name):
     if not page_name.endswith('.html'): return "Not Found", 404
     admin_pages = ['Bot.html', 'Usuarios.html', 'Configuracion.html', 'Dashboard.html'] 
-    if current_user.role == 'Soporte' and page_name in admin_pages: return redirect(url_for('menu_soporte'))
+    
+    if current_user.role == 'Soporte' and page_name in admin_pages: 
+        return redirect(url_for('menu_soporte'))
+        
     return render_template(page_name, current_user=current_user)
 
-# --- API LOGIN/LOGOUT ---
+# --- API DE LOGIN Y LOGOUT ---
 @app.route('/api/login', methods=['POST'])
 def login():
     data = request.get_json()
@@ -169,316 +198,7 @@ def logout():
     logout_user()
     return jsonify({"success": True, "redirect_url": url_for('index')})
 
-# --- FUNCIONES AUXILIARES ---
-def send_reply(phone_number, message_content):
-    """Envía mensaje al bot de Baileys"""
-    baileys_bot_url = os.getenv('BAILEYS_BOT_URL')
-    if not baileys_bot_url: return False
-    try:
-        requests.post(f"{baileys_bot_url}/send", json={"number": phone_number, "message": message_content}, timeout=30)
-        return True
-    except Exception as e:
-        logging.error(f"Error enviando a Baileys: {e}")
-        return False
-
-def get_random_active_role(base_role_title):
-    """Balanceo de carga de roles"""
-    possible_roles = BotRole.query.filter(or_(BotRole.title == base_role_title, BotRole.title.like(f"{base_role_title}_%")), BotRole.status == 'Activo').all()
-    return random.choice(possible_roles) if possible_roles else None
-
-# --- LÓGICA IA: TEXTOS Y MENÚS ---
-
-def _get_main_menu(nombre_usuario):
-    nombre = f"¡Hola! *{nombre_usuario}*, " if nombre_usuario else "¡Hola! "
-    return f"""{nombre}Bienvenido a *VTN SEGUROS - Grupo Montenegro*. Para nosotros es un gusto atenderte 🫡
-
-Escribe el *número* de tu solicitud:
-
-*1.* Presentas un accidente o requieres asistencia. 🚑
-*2.* Requieres una cotización. 📊
-*3.* Continuar con proceso de compra.💳
-*4.* Inquietudes de tu póliza, certificados, coberturas, pagos y renovaciones.✍🏼
-*5.* Consultar estado de siniestro/Financiaciones y pagos.⏳💰
-*6.* Solicitud de cancelación de póliza y reintegro de dinero.📝
-*7.* Comunicarse directamente con asesor por motivo de quejas y peticiones. ☹
-
-Agradecemos la confianza depositada en nuestra labor."""
-
-def _get_cotizaciones_menu():
-    return """Escribe el *número* del producto que deseas cotizar: 🔢
-*1.* Automóviles, motos, vehículos pesados.
-*2.* Hogar.
-*3.* Empresa.
-*4.* Vida, salud y otros.
-*Escribe A para volver al menú principal.*"""
-
-def _get_agent_response_and_role(option):
-    mapeo_roles = {
-        "1": "Presentas un accidente o requieres asistencia", 
-        "3": "Continuar con proceso de compra", 
-        "4": "Inquietudes de tu póliza, certificados, coberturas, pagos y renovaciones",
-        "5": "Consultar estado de siniestro/Financiaciones y pagos",
-        "6": "Solicitud de cancelación de póliza y reintegro de dinero",
-        "7": "Comunicarse directamente con asesor por motivo de quejas y peticiones"
-    }
-    response_parts = []
-    if option == '1':
-        response_parts = ["*Lamentamos lo sucedido!*", "Reúne la evidencia por medio de *fotos*... 📸", "_Pronto te contactaremos._"]
-    elif option in ['3', '4', '5']:
-        response_parts = ["Confírmanos por favor la *placa de tu vehículo* y qué duda o inquietud te podemos aclarar.", "_En minutos un agente te estará acompañando 🫡_"]
-    elif option == '6':
-        response_parts = ["Solicitud de cancelación.", "Indícanos por favor la *placa del vehículo* y cuál es el *motivo de cancelación*.", "En minutos un agente te acompañará."]
-    elif option == '7':
-        response_parts = ["Quejas y peticiones. ☹", "Confírmanos qué sucedió y envíanos tu *número de placa*.", "Un agente te atenderá."]
-    
-    full = "\n\n".join(response_parts) + "\n\n*Escribe A para volver al menú principal.*"
-    return mapeo_roles.get(option, "General"), full
-
-def _get_cotizacion_detail(sub_option):
-    if sub_option == '1': return "🚘 Autos: Indícanos Placa, Nombre, Cédula, etc...\n*Escribe A para volver.*"
-    if sub_option == '2': return "🏡 Hogar: Dirección, Área, Valor, etc...\n*Escribe A para volver.*"
-    if sub_option == '3': return "🏦 Empresa: NIT, Actividad, etc...\n*Escribe A para volver.*"
-    if sub_option == '4': return "Vida/Salud: Un agente te atenderá en breve.\n*Escribe A para volver.*"
-    return ""
-
-# --- MÁQUINA DE ESTADOS IA ---
-def get_ia_response_and_route(convo, message_body):
-    logging.info(f"IA State Machine: Procesando estado '{convo.status}'")
-    try:
-        # Opción global: Volver al menú con 'A' (salvo en saludo o espera de placa)
-        if convo.status.startswith('ia_') and convo.status not in ['ia_greeting', 'ia_wait_for_placa_or_2'] and message_body.strip().upper() == 'A':
-            convo.status = 'ia_show_menu' 
-            db.session.add(convo)
-            return ("chat", _get_main_menu(convo.user_display_name))
-
-        # Estado: Saludo Conocido
-        if convo.status == 'ia_greeting_known':
-            if convo.user_display_name:
-                convo.status = 'ia_show_menu' 
-                db.session.add(convo)
-                return ("chat", _get_main_menu(convo.user_display_name))
-            else:
-                 convo.status = 'ia_greeting'
-                 db.session.add(convo) # Pasa al siguiente bloque
-
-        # Estado: Saludo Inicial
-        if convo.status == 'ia_greeting':
-            convo.status = 'ia_wait_for_placa_or_2'
-            db.session.add(convo)
-            msg = (
-                "¡Hola! Bienvenido a *VTN SEGUROS - Grupo Montenegro*. Para nosotros es un gusto atenderte 🫡\n\n"
-                "¿Ya eres cliente de nosotros? 🤔\n\n"
-                "*Si eres cliente, por favor ingresa tu número de placa.*\n"
-                "*Si eres cliente nuevo, por favor ingresa el número 2* y te remitiremos con uno de nuestros asistentes. 🤝"
-            )
-            return ("chat", msg)
-        
-        # Estado: Esperando Placa o '2'
-        elif convo.status == 'ia_wait_for_placa_or_2':
-            user_input = message_body.strip().upper()
-            if user_input == '2':
-                logging.info("Cliente Nuevo (Opción 2). Enrutando a Cotizaciones.")
-                if not convo.user_display_name:
-                    convo.user_display_name = "Cliente Nuevo" 
-                    convo.user_reported_phone = convo.user_phone.split('@')[0].replace('whatsapp:', '').replace('+', '')
-                    db.session.add(convo)
-                role_name = "Requieres una cotización"
-                return ("route_and_message", {"role": role_name, "message": f"¡Perfecto! Un agente del área de *{role_name}* te contactará en breve. 👋"})
-            else:
-                # Buscar Placa
-                policy_record = PolicyData.query.filter(PolicyData.placa.ilike(user_input)).first()
-                if policy_record:
-                    convo.user_display_name = policy_record.nombres
-                    convo.user_reported_phone = convo.user_phone.split('@')[0].replace('whatsapp:', '').replace('+', '')
-                    convo.status = 'ia_show_menu'
-                    db.session.add(convo)
-                    return ("chat", _get_main_menu(convo.user_display_name))
-                else:
-                    return ("chat", f"La placa *{user_input}* no fue encontrada. 😔\nPor favor verifica o *ingresa el número 2* para ser atendido por un agente.")
-
-        # Estado: Menú Principal
-        elif convo.status == 'ia_show_menu':
-            opcion = message_body.strip()
-            if opcion == '2':
-                convo.status = 'ia_cotizaciones_sub'
-                db.session.add(convo)
-                return ("chat", _get_cotizaciones_menu())
-            elif opcion in ['1', '3', '4', '5', '6', '7']:
-                role_name, response_msg = _get_agent_response_and_role(opcion)
-                convo.status = f'ia_wait_for_info_opcion_{opcion}' 
-                db.session.add(convo)
-                return ("chat", response_msg)
-            else:
-                return ("chat", f"La opción *'{opcion}'* no es válida. Por favor, selecciona un número del 1 al 7.\n\n" + _get_main_menu(convo.user_display_name))
-
-        # Estado: Sub-Menú Cotizaciones
-        elif convo.status == 'ia_cotizaciones_sub':
-            sub = message_body.strip()
-            if sub in ['1', '2', '3']:
-                convo.status = 'ia_cotizaciones_wait' # Espera información
-                db.session.add(convo)
-                return ("chat", _get_cotizacion_detail(sub))
-            elif sub == '4':
-                convo.status = 'ia_wait_for_info_opcion_2_4'
-                db.session.add(convo)
-                return ("chat", _get_cotizacion_detail('4'))
-            else:
-                return ("chat", "Opción inválida. Selecciona 1-4.")
-
-        # Estados de Espera -> Enrutamiento
-        elif convo.status.startswith('ia_wait_for_info_opcion_') or convo.status == 'ia_cotizaciones_wait':
-            # Aquí el usuario ya ingresó la info solicitada (motivo, placa, etc.)
-            role_name = "General"
-            if 'opcion_1' in convo.status: role_name = "Presentas un accidente o requieres asistencia"
-            elif 'opcion_3' in convo.status: role_name = "Continuar con proceso de compra"
-            elif 'opcion_4' in convo.status: role_name = "Inquietudes de tu póliza, certificados, coberturas, pagos y renovaciones"
-            elif 'opcion_5' in convo.status: role_name = "Consultar estado de siniestro/Financiaciones y pagos"
-            elif 'opcion_6' in convo.status: role_name = "Solicitud de cancelación de póliza y reintegro de dinero"
-            elif 'opcion_7' in convo.status: role_name = "Comunicarse directamente con asesor por motivo de quejas y peticiones"
-            elif 'opcion_2_4' in convo.status or convo.status == 'ia_cotizaciones_wait': role_name = "Requieres una cotización"
-            
-            return ("route", role_name)
-
-        else:
-            convo.status = 'ia_greeting'
-            db.session.add(convo)
-            return ("chat", "Ocurrió un error inesperado. Reiniciando...")
-
-    except Exception as e:
-        logging.error(f"Error IA: {e}")
-        return ("route", "General")
-
-# --- WEBHOOK PRINCIPAL ---
-@app.route('/api/baileys/webhook', methods=['POST'])
-def baileys_webhook():
-    data = request.json
-    message_body = data.get('Body')
-    sender_phone = data.get('From')
-    
-    # RESTAURADO: Recuperar tipo y url de media
-    message_type = data.get('MessageType', 'text')
-    media_url = data.get('MediaUrl')
-
-    if (not message_body and not media_url) or not sender_phone:
-        return jsonify({"error": "Datos insuficientes"}), 400
-        
-    logging.info(f"Mensaje de {sender_phone}: {message_body} (Tipo: {message_type})")
-
-    try:
-        existing_convo = Conversation.query.filter_by(user_phone=sender_phone).order_by(Conversation.created_at.desc()).first()
-        
-        # 1. Usuario escribe 'A' en chat abierto -> Volver a Menú
-        if existing_convo and existing_convo.status == 'open' and message_body and message_body.strip().upper() == 'A':
-            existing_convo.status = 'ia_show_menu'
-            existing_convo.unread_count = 0 
-            existing_convo.pending_counted = False 
-            menu_msg = _get_main_menu(existing_convo.user_display_name)
-            send_reply(sender_phone, menu_msg)
-
-            # RESTAURADO: Usar sender_type 'user' y 'system'
-            db.session.add_all([
-                Message(conversation_id=existing_convo.id, sender_type='user', content=message_body, message_type='text'),
-                Message(conversation_id=existing_convo.id, sender_type='system', content=menu_msg)
-            ])
-            db.session.commit()
-            return jsonify({"status": "returned_to_menu"}), 200
-        
-        # 2. Chat Abierto -> Guardar mensaje
-        if existing_convo and existing_convo.status == 'open':
-            # RESTAURADO: Usar todos los campos
-            new_message = Message(
-                conversation_id=existing_convo.id, 
-                sender_type='user', 
-                content=message_body or "[Multimedia]",
-                message_type=message_type, 
-                media_url=media_url
-            )
-            db.session.add(new_message)
-
-            existing_convo.unread_count = (existing_convo.unread_count or 0) + 1
-            existing_convo.updated_at = datetime.utcnow()
-            if existing_convo.bot_role and not existing_convo.pending_counted:
-                existing_convo.bot_role.chats_pending = (existing_convo.bot_role.chats_pending or 0) + 1
-                existing_convo.pending_counted = True
-            db.session.commit()
-            return jsonify({"status": "message_queued"}), 200
-
-        # 3. Verificar Bot Activo
-        bot_config = BotConfig.query.first()
-        if not bot_config or not bot_config.is_active:
-            return jsonify({"status": "bot_inactive"}), 200
-        
-        # 4. Conversación IA (Existente o Nueva)
-        if existing_convo and existing_convo.status.startswith('ia_'):
-            convo = existing_convo
-        else:
-            general = BotRole.query.filter_by(title='General').first()
-            if not general: return jsonify({"error": "Falta rol General"}), 500
-            prev = Conversation.query.filter(Conversation.user_phone == sender_phone, Conversation.user_display_name.isnot(None)).order_by(Conversation.created_at.desc()).first()
-            convo = Conversation(user_phone=sender_phone, bot_role_id=general.id)
-            if prev:
-                convo.user_display_name = prev.user_display_name
-                convo.user_reported_phone = prev.user_reported_phone
-                convo.status = 'ia_greeting_known'
-            else:
-                convo.status = 'ia_greeting'
-            db.session.add(convo)
-            db.session.flush()
-
-        # Guardar mensaje usuario (RESTAURADO)
-        db.session.add(Message(conversation_id=convo.id, sender_type='user', content=message_body or "[Media]", message_type=message_type, media_url=media_url))
-        
-        # Ejecutar IA
-        action, data_resp = get_ia_response_and_route(convo, message_body or "")
-
-        # Procesar Acción IA
-        if action == "route":
-            target = get_random_active_role(data_resp)
-            if not target:
-                msg = f"Ups, el departamento de '{data_resp}' no está disponible."
-                send_reply(sender_phone, msg)
-                db.session.add(Message(conversation_id=convo.id, sender_type='system', content=msg))
-            else:
-                convo.status = 'open'
-                convo.bot_role_id = target.id
-                convo.pending_counted = True
-                target.chats_received = (target.chats_received or 0) + 1
-                target.chats_pending = (target.chats_pending or 0) + 1
-                
-                trans_msg = f"¡Entendido! Un agente del área de {target.title} te atenderá pronto."
-                send_reply(sender_phone, trans_msg)
-                db.session.add_all([
-                    Message(conversation_id=convo.id, sender_type='system', content=f"Chat enrutado a {target.title}."),
-                    Message(conversation_id=convo.id, sender_type='system', content=trans_msg)
-                ])
-            
-        elif action == "route_and_message":
-            target = get_random_active_role(data_resp['role'])
-            send_reply(sender_phone, data_resp['message'])
-            db.session.add(Message(conversation_id=convo.id, sender_type='system', content=data_resp['message']))
-            
-            if target:
-                convo.status = 'open'
-                convo.bot_role_id = target.id
-                convo.pending_counted = True
-                target.chats_received += 1
-                target.chats_pending += 1
-                db.session.add(Message(conversation_id=convo.id, sender_type='system', content=f"Chat enrutado a {target.title}."))
-
-        elif action == "chat":
-            send_reply(sender_phone, data_resp)
-            db.session.add(Message(conversation_id=convo.id, sender_type='system', content=data_resp))
-
-        convo.updated_at = datetime.utcnow()
-        db.session.commit()
-        return jsonify({"status": "ia_processed"}), 200
-
-    except Exception as e:
-        db.session.rollback()
-        logging.error(f"Error Webhook: {e}")
-        return jsonify({"error": "Error interno"}), 500
-
-# --- APIS DE ADMINISTRACIÓN ---
+# --- APIS DE ADMIN (PROTEGIDAS) ---
 def check_admin():
     if current_user.role != 'Admin': return jsonify({"error": "No autorizado"}), 403
     return None
@@ -493,7 +213,8 @@ def get_users():
 @app.route('/api/users', methods=['POST'])
 @login_required
 def add_user():
-    if check_admin(): return check_admin()
+    admin_check = check_admin()
+    if admin_check: return admin_check
     data = request.get_json()
     base_username = re.sub(r'\s+', '', data.get('name', 'usuario')).split(' ')[0].lower().strip()
     if not base_username: base_username = 'usuario'
@@ -502,247 +223,1351 @@ def add_user():
     while User.query.filter_by(username=username).first():
         username = f"{base_username}{counter}"
         counter += 1
+            
+    if User.query.filter_by(username=username).first():
+        return jsonify({'message': 'El nombre de usuario ya existe'}), 409
     
-    new_user = User(username=username, name=data['name'], password=data['password'], role=data['role'])
+    new_user = User(
+        username=username, 
+        name=data['name'], 
+        password=data['password'], 
+        role=data['role']
+    )
     db.session.add(new_user)
     db.session.commit()
-    return jsonify({'success': True}), 201
+    return jsonify({'id': new_user.id, 'name': new_user.name, 'role': new_user.role, 'username': new_user.username}), 201
 
 @app.route('/api/users/<int:id>', methods=['PUT'])
 @login_required
 def update_user(id):
-    if check_admin(): return check_admin()
+    admin_check = check_admin()
+    if admin_check: return admin_check
     user = User.query.get_or_404(id)
     data = request.get_json()
     user.name = data.get('name', user.name)
     user.role = data.get('role', user.role)
-    if data.get('password'): user.password = data['password']
+    if 'password' in data and data['password']:
+        user.password = data['password']
     db.session.commit()
-    return jsonify({'message': 'Actualizado'})
+    return jsonify({'message': 'Usuario actualizado correctamente'})
 
 @app.route('/api/users/<int:id>', methods=['DELETE'])
 @login_required
 def delete_user(id):
-    if check_admin(): return check_admin()
-    db.session.delete(User.query.get_or_404(id))
+    admin_check = check_admin()
+    if admin_check: return admin_check
+    user = User.query.get_or_404(id)
+    db.session.delete(user)
     db.session.commit()
-    return jsonify({'message': 'Eliminado'})
+    return jsonify({'message': 'Usuario eliminado correctamente'})
 
 @app.route('/api/bot_roles', methods=['GET'])
 @login_required
 def get_bot_roles():
-    if check_admin(): return check_admin()
+    admin_check = check_admin()
+    if admin_check: return admin_check
     roles = BotRole.query.options(db.joinedload(BotRole.assignee)).all()
-    return jsonify([{'id': r.id, 'title': r.title, 'assignee_name': r.assignee.name if r.assignee else 'Sin Asignar', 'assignee_id': r.assignee_id, 'status': r.status, 'chats_pending': r.chats_pending} for r in roles])
+    return jsonify([{'id': r.id, 'title': r.title, 'knowledge_base': r.knowledge_base,
+                     'assignee_name': r.assignee.name if r.assignee else 'Sin Asignar',
+                     'assignee_id': r.assignee_id, 'status': r.status,
+                     'chats_received': r.chats_received or 0, 'chats_pending': r.chats_pending or 0,
+                     'chats_resolved': r.chats_resolved or 0} for r in roles])
+
+@app.route('/api/bot_roles/list', methods=['GET'])
+@login_required
+def get_bot_roles_list():
+    try:
+        roles = BotRole.query.filter(BotRole.status == 'Activo', BotRole.title != 'General').order_by(BotRole.title).all()
+        return jsonify([{'id': r.id, 'title': r.title} for r in roles])
+    except Exception as e:
+        logging.error(f"Error en /api/bot_roles/list: {e}")
+        return jsonify({"error": str(e)}), 500
 
 @app.route('/api/bot_roles', methods=['POST'])
 @login_required
 def add_bot_role():
-    if check_admin(): return check_admin()
+    admin_check = check_admin()
+    if admin_check: return admin_check
     data = request.get_json()
-    if BotRole.query.filter_by(title=data['title']).first(): return jsonify({'message': 'Existe'}), 409
-    db.session.add(BotRole(title=data['title'], assignee_id=data.get('assignee_id'), status=data.get('status', 'Activo')))
+    if BotRole.query.filter_by(title=data['title']).first():
+        return jsonify({'message': 'Un rol con este título ya existe'}), 409
+    assignee_id = data.get('assignee_id')
+    new_role = BotRole(title=data['title'], knowledge_base=data.get('knowledge_base', ''),
+                       assignee_id=int(assignee_id) if assignee_id else None, status=data.get('status', 'Activo'))
+    db.session.add(new_role)
     db.session.commit()
-    return jsonify({'success': True}), 201
+    role_data = BotRole.query.get(new_role.id)
+    return jsonify({'id': role_data.id, 'title': role_data.title, 'knowledge_base': role_data.knowledge_base,
+                    'assignee_name': role_data.assignee.name if role_data.assignee else 'Sin Asignar',
+                    'assignee_id': role_data.assignee_id, 'status': role_data.status,
+                    'chats_received': role_data.chats_received or 0,
+                    'chats_pending': role_data.chats_pending or 0,
+                    'chats_resolved': role_data.chats_resolved or 0}), 201
 
-@app.route('/api/bot_roles/<int:id>', methods=['PUT', 'DELETE'])
+@app.route('/api/bot_roles/<int:id>', methods=['PUT'])
 @login_required
-def manage_role(id):
-    if check_admin(): return check_admin()
+def update_bot_role(id):
+    admin_check = check_admin()
+    if admin_check: return admin_check
     role = BotRole.query.get_or_404(id)
-    if request.method == 'DELETE':
-        db.session.delete(role)
-    else:
-        data = request.get_json()
-        role.title = data.get('title', role.title)
-        role.assignee_id = data.get('assignee_id') or None
-        role.status = data.get('status', role.status)
+    data = request.get_json()
+    role.title = data.get('title', role.title)
+    role.knowledge_base = data.get('knowledge_base', role.knowledge_base)
+    role.status = data.get('status', role.status)
+    assignee_id = data.get('assignee_id')
+    role.assignee_id = int(assignee_id) if assignee_id else None
     db.session.commit()
-    return jsonify({'success': True})
+    return jsonify({'message': 'Rol del bot actualizado correctamente'})
 
-@app.route('/api/bot_config', methods=['GET', 'PUT'])
+@app.route('/api/bot_roles/<int:id>', methods=['DELETE'])
 @login_required
-def manage_config():
-    if check_admin(): return check_admin()
+def delete_bot_role(id):
+    admin_check = check_admin()
+    if admin_check: return admin_check
+    role = BotRole.query.get_or_404(id)
+    db.session.delete(role)
+    db.session.commit()
+    return jsonify({'message': 'Rol del bot eliminado correctamente'})
+
+@app.route('/api/bot_config', methods=['GET'])
+@login_required
+def get_bot_config():
+    admin_check = check_admin()
+    if admin_check: return admin_check
     config = BotConfig.query.first()
     if not config:
-        config = BotConfig()
+        config = BotConfig(is_active=True, whatsapp_number="+573132217862", welcome_message="¡Hola! Bienvenido a nuestro servicio de atención. ¿En qué puedo ayudarte hoy?")
         db.session.add(config)
         db.session.commit()
-    if request.method == 'PUT':
-        data = request.get_json()
-        config.is_active = data.get('is_active', config.is_active)
-        config.whatsapp_number = data.get('whatsapp_number', config.whatsapp_number)
-        db.session.commit()
-    return jsonify({'is_active': config.is_active, 'whatsapp_number': config.whatsapp_number})
+    return jsonify({'is_active': config.is_active, 'whatsapp_number': config.whatsapp_number, 'welcome_message': config.welcome_message})
 
-# --- APIS DE CHATS ---
+@app.route('/api/bot_config', methods=['PUT'])
+@login_required
+def update_bot_config():
+    admin_check = check_admin()
+    if admin_check: return admin_check
+    config = BotConfig.query.first_or_404()
+    data = request.get_json()
+    config.is_active = data.get('is_active', config.is_active)
+    config.whatsapp_number = data.get('whatsapp_number', config.whatsapp_number)
+    config.welcome_message = data.get('welcome_message', config.welcome_message)
+    db.session.commit()
+    return jsonify({'message': 'Configuración del bot actualizada correctamente'})
+
+
+# --- NUEVA: Función helper para enviar respuestas a Baileys ---
+def send_reply(phone_number, message_content):
+    """
+    Envía un mensaje de respuesta al bot de Baileys (Servicio B).
+    """
+    baileys_bot_url = os.getenv('BAILEYS_BOT_URL')
+    if not baileys_bot_url:
+        logging.error("BAILEYS_BOT_URL no está configurada. No se puede enviar respuesta.")
+        return False
+
+    send_url = f"{baileys_bot_url}/send"
+    payload = {
+        "number": phone_number, 
+        "message": message_content
+    }
+    
+    try:
+        logging.info(f"Enviando respuesta a Baileys: {send_url} (Para: {phone_number})")
+        response = requests.post(send_url, json=payload, timeout=30)
+        
+        if response.status_code != 200:
+            logging.error(f"El bot de Baileys respondió con {response.status_code}: {response.text}")
+            return False
+        
+        logging.info(f"Respuesta enviada exitosamente a Baileys.")
+        return True
+        
+    except Exception as e:
+        logging.error(f"Error al llamar al bot de Baileys: {e}")
+        return False
+
+
+# --- INICIO DE NUEVA FUNCIÓN DE BALANCEO ---
+def get_random_active_role(base_role_title):
+    """
+    Busca todos los roles activos que coincidan con un título base (ej. "Rol" o "Rol_2")
+    y devuelve uno al azar para balanceo de carga.
+    """
+    logging.info(f"Balanceo de carga: Buscando roles activos para la base: '{base_role_title}'")
+    
+    possible_roles = BotRole.query.filter(
+        or_(
+            BotRole.title == base_role_title,
+            BotRole.title.like(f"{base_role_title}_%")
+        ),
+        BotRole.status == 'Activo'
+    ).all()
+    
+    if not possible_roles:
+        logging.warning(f"Balanceo de carga: No se encontraron roles activos que coincidan con la base '{base_role_title}'.")
+        return None
+        
+    target_role = random.choice(possible_roles)
+    logging.info(f"Balanceo de carga: Roles encontrados: {[r.title for r in possible_roles]}. Rol seleccionado aleatoriamente: '{target_role.title}'")
+    return target_role
+# --- FIN DE NUEVA FUNCIÓN DE BALANCEO ---
+
+
+# --- MÁQUINA DE ESTADOS (Funciones Anidadas) ---
+
+# Función para obtener el menú principal (con formato)
+def _get_main_menu(nombre_usuario):
+    nombre_personalizado = f"¡Hola! *{nombre_usuario}*, " if nombre_usuario else "¡Hola! "
+    return f"""{nombre_personalizado}Bienvenido a *VTN SEGUROS - Grupo Montenegro*. Para nosotros es un gusto atenderte 🫡
+
+Escribe el *número* de tu solicitud:
+
+*1.* Presentas un accidente o requieres asistencia. 🚑
+*2.* Requieres una cotización. 📊
+*3.* Continuar con proceso de compra.💳
+*4.* Inquietudes de tu póliza, certificados, coberturas, pagos y renovaciones.✍🏼
+*5.* Consultar estado de siniestro/Financiaciones y pagos.⏳💰
+*6.* Solicitud de cancelación de póliza y reintegro de dinero.📝
+*7.* Comunicarse directamente con asesor por motivo de quejas y peticiones. ☹
+
+Agradecemos la confianza depositada en nuestra labor."""
+
+# Función para obtener el sub-menú de Cotizaciones
+def _get_cotizaciones_menu():
+    return f"""Escribe el *número* del producto que deseas cotizar: 🔢
+
+*1.* Automóviles, motos, vehículos pesados.
+*2.* Hogar.
+*3.* Empresa.
+*4.* Vida, salud y otros.
+
+*Escribe A para volver al menú principal.*
+"""
+
+# Función que define la respuesta y acción para opciones que enrutan (1, 3, 4, 5, 6, 7)
+def _get_agent_response_and_role(option):
+    # --- INICIO DE CORRECCIÓN: Mapeo a los nombres de rol de la imagen ---
+    mapeo_roles = {
+        "1": "Presentas un accidente o requieres asistencia", 
+        "3": "Continuar con proceso de compra", 
+        "4": "Inquietudes de tu póliza, certificados, coberturas, pagos y renovaciones",
+        "5": "Consultar estado de siniestro/Financiaciones y pagos",
+        "6": "Solicitud de cancelación de póliza y reintegro de dinero",
+        "7": "Comunicarse directamente con asesor por motivo de quejas y peticiones"
+    }
+    # --- FIN DE CORRECCIÓN ---
+    
+    response_parts = []
+    
+    if option == '1':
+        response_parts = [
+            "*Lamentamos lo sucedido!* Deseamos que te encuentres bien.",
+            "Reúne la evidencia por medio de *fotos*, donde se vean placas, señales de transito y ubicación de los vehículos. 📸",
+            "Si hay un tercero involucrado, comunícate con la aseguradora y solicita asistencia de abogado 💼 y si es necesario, servicio de grúa.",
+            "_Pronto te contactaremos._"
+        ]
+    elif option == '3':
+        response_parts = [
+            "Indícanos qué dudas o inquietudes tienes 🤓.",
+            "_En minutos un agente te estará acompañando 🫡_"
+        ]
+    elif option == '4':
+        response_parts = [
+            "Confírmanos por favor la *placa de tu vehículo* y qué duda o inquietud te podemos aclarar.",
+            "_En minutos un agente te estará acompañando 🫡_"
+        ]
+    elif option == '5':
+        response_parts = [
+            "Confírmanos por favor la *placa de tu vehículo* y qué duda o inquietud te podemos aclarar.",
+            "_En minutos un agente te estará acompañando 🫡_"
+        ]
+    elif option == '6':
+        response_parts = [
+            "Solicitud de cancelación de póliza y reintegro de dinero.📝",
+            "Indícanos por favor la *placa del vehículo* y cuál es el *motivo de cancelación* de la póliza.",
+            "En minutos un agente te estará acompañando en la solicitud 🫡"
+        ]
+    elif option == '7':
+        response_parts = [
+            "Comunicarse directamente con asesor por motivo de quejas y peticiones. ☹",
+            "Confírmanos por favor *cómo te podemos colaborar, qué sucedió*, y envíanos el *número de placa*.",
+            "En minutos un agente te estará acompañando en la solicitud."
+        ]
+    
+    full_response = "\n\n".join(response_parts)
+    
+    # Se añade la nota de "escribe A para volver" a todas las opciones que enrutan
+    full_response += "\n\n*Escribe A para volver al menú principal.*"
+
+    return mapeo_roles.get(option, "General"), full_response
+
+
+
+# Función que define la respuesta para las cotizaciones (Sub-Opciones de 2)
+def _get_cotizacion_detail(sub_option):
+    if sub_option == '1':
+        return (
+            "🚘 Para elaborarte varias propuestas, indícanos por escrito los siguientes datos:\n\n"
+            "🔹*Placa:* (Si es 0km, marca, línea, modelo)\n"
+            "🔹*Nombre propietario:*\n"
+            "🔹*Cédula:*\n"
+            "🔹*Fecha nacimiento:*\n"
+            "🔹*Ciudad residencia:*\n\n"
+            "¿El vehículo tiene prenda?\n"
+            "¿El vehículo es blindado?\n"
+            "Nos indicas por favor cuánto estás pagando de seguro actualmente.\n\n"
+            "_Debido a la alta cantidad de propuestas que estamos elaborando, enviaremos tus propuestas en el transcurso del día siguiente._\n\n"
+            "*Escribe A para volver al menú principal.*"
+        )
+    elif sub_option == '2':
+        return (
+            "Envíanos los siguientes datos para cotizar tú póliza de *Hogar*: 🏡\n\n"
+            "*Dirección y ciudad:*\n"
+            "*Área construida:*\n"
+            "*Año de construcción:*\n"
+            "*Número de pisos* (casa):\n"
+            "*Número de pisos totales edificio* (apartamento):\n\n"
+            "*Nombre propietario:*\n"
+            "*Cédula:*\n\n"
+            "▫*Valor edificación:* $\n"
+            "▫*Valor contenidos muebles:* $\n"
+            "▫*Valor contenidos equipos electrónicos:* $\n"
+            "▫*Valor equipos móviles y portátiles (OPCIONAL):* $\n"
+            "▫*Valor Celulares (OPCIONAL):* $\n"
+            "▫*Valor contenidos joyas (OPCIONAL):* $\n\n"
+            "*Desea asegurar los contenidos por hurto? o solo por daños?*\n\n"
+            "*Escribe A para volver al menú principal.*"
+        )
+    elif sub_option == '3':
+        return (
+            "Envíanos los siguientes datos para cotizar tú seguro *Empresarial*: 🏦\n\n"
+            "*Dirección y ciudad:*\n"
+            "*Razón social:*\n"
+            "*NIT:*\n"
+            "*Detalle de actividad:*\n\n"
+            "*Año de construcción de edificación:*\n"
+            "*Material de construcción:*\n\n"
+            "*Nombre del propietario y cédula:*\n\n"
+            "▫*Edificación:* $ (solo si es propia)\n"
+            "▫*Mejoras locativas:* $\n"
+            "▫*Equipos eléctricos y electrónicos:* $\n"
+            "▫*Equipo Móvil y portátil:* $\n"
+            "▫*Muebles y enseres:* $\n"
+            "▫*Maquinaria y Equipo:* $\n"
+            "▫*Mercancías:* $\n"
+            "▫*Dineros en el local:* $\n\n"
+            "*Escribe A para volver al menú principal.*"
+        )
+    elif sub_option == '4':
+        return (
+            "Para cotizaciones de *Vida, Salud y Otros*:\n\n"
+            "_En minutos un agente te estará acompañando 🫡_\n\n"
+            "*Escribe A para volver al menú principal.*"
+        )
+    return ""
+
+
+# --- FUNCIÓN PRINCIPAL DE LA MÁQUINA DE ESTADOS ---
+# CORREGIDO: Se re-integra el bloque try/except con la indentación correcta.
+def get_ia_response_and_route(convo, message_body):
+    """
+    Gestiona la conversación de la IA como una máquina de estados.
+    Modifica el objeto 'convo' directamente.
+    """
+    logging.info(f"IA State Machine: Procesando estado '{convo.status}'")
+
+    try:
+        # -----------------------------------------------------
+        # --- LÓGICA DE REGRESO AL MENÚ PRINCIPAL ('A') ---
+        # -----------------------------------------------------
+        if convo.status.startswith('ia_') and convo.status not in ['ia_greeting', 'ia_ask_name', 'ia_ask_phone', 'ia_confirm_details'] and message_body.strip().upper() == 'A':
+            logging.info(f"Usuario {convo.user_phone} solicitó volver al menú principal desde {convo.status}.")
+            convo.status = 'ia_show_menu' 
+            db.session.add(convo)
+            return ("chat", _get_main_menu(convo.user_display_name))
+
+
+        # -----------------------------------------------------
+        # --- MÁQUINA DE ESTADOS NORMAL ---
+        # -----------------------------------------------------
+
+        # --- ESTADO 0: Saludo (Usuario Conocido) ('ia_greeting_known') ---
+        if convo.status == 'ia_greeting_known':
+            convo.status = 'ia_show_menu' 
+            db.session.add(convo)
+            return ("chat", _get_main_menu(convo.user_display_name))
+
+        # --- ESTADO 1: Saludo Inicial y Petición de Datos ('ia_greeting') ---
+        elif convo.status == 'ia_greeting':
+            convo.status = 'ia_wait_for_details' # Nuevo estado de espera
+            db.session.add(convo)
+            
+            # Nuevo mensaje unificado
+            welcome_msg = (
+                "¡Hola! Bienvenido a *VTN SEGUROS - Grupo Montenegro*. Para nosotros es un gusto atenderte.\n\n"
+                "Para brindarte un mejor servicio, por favor indícame tus datos en un *solo mensaje* siguiendo este formato:\n\n"
+                "*Tu Nombre Completo, Tu Celular, Placa de tu vehículo* (si aplica)\n\n"
+                "Por ejemplo:\n"
+                "```Juan Perez, 3001234567, ABC123```\n"
+                "O si no tienes vehículo:\n"
+                "```Maria Lopez, 3109876543```\n\n"
+                "*(Usa comas ',' para separar los datos, por favor)*"
+            )
+            return ("chat", welcome_msg)
+        
+
+        # --- ESTADO 2: Esperando los detalles unificados ('ia_wait_for_details') ---
+        elif convo.status == 'ia_wait_for_details':
+            # Separar el input del usuario por comas
+            parts = [p.strip() for p in message_body.strip().split(',')]
+            
+            # Verificar si el formato es mínimamente correcto (Nombre y Celular)
+            if len(parts) >= 2:
+                # El formato es correcto, guardamos los datos
+                convo.user_display_name = parts[0]
+                convo.user_reported_phone = parts[1]
+                # La placa (parts[2]), si existe, quedará registrada en el historial del chat
+                
+                convo.status = 'ia_show_menu' # Avanzar al menú principal
+                db.session.add(convo)
+                
+                # Devolver el menú principal
+                return ("chat", _get_main_menu(convo.user_display_name))
+            
+            else:
+                # El formato es incorrecto, volver a pedir
+                # El estado no cambia, se mantiene en 'ia_wait_for_details'
+                
+                retry_msg = (
+                    "No pude entender tus datos. 😟 Por favor, asegúrate de usar el formato correcto, separando cada dato con una *coma* (',').\n\n"
+                    "Formato:\n"
+                    "*Tu Nombre Completo, Tu Celular, Placa de tu vehículo* (si aplica)\n\n"
+                    "Por ejemplo:\n"
+                    "```Juan Perez, 3001234567, ABC123```"
+                )
+                return ("chat", retry_msg)
+
+        # --- ESTADO 5: Mostrando el Menú (Esperando opción 1-7) ('ia_show_menu') ---
+        elif convo.status == 'ia_show_menu':
+            opcion = message_body.strip()
+            
+            if opcion == '2':
+                convo.status = 'ia_cotizaciones_sub' # Mover al sub-menú
+                db.session.add(convo)
+                return ("chat", _get_cotizaciones_menu())
+            
+            # --- INICIO DE CORRECCIÓN (Lógica para opciones 1, 3, 4, 5, 6, 7) ---
+            elif opcion in ['1', '3', '4', '5', '6', '7']:
+                # Mover a un estado de espera después de enviar el mensaje.
+                
+                role_name, response_msg = _get_agent_response_and_role(opcion)
+                
+                # Asignamos un estado de espera específico que guarda la intención
+                convo.status = f'ia_wait_for_info_opcion_{opcion}' 
+                db.session.add(convo)
+                
+                # Retornamos solo la acción 'chat' con el mensaje de solicitud de info
+                return ("chat", response_msg)
+            # --- FIN DE CORRECCIÓN ---
+            
+            else:
+                return ("chat", f"La opción *'{opcion}'* no es válida. Por favor, selecciona un número del 1 al 7.\n\n" + _get_main_menu(convo.user_display_name))
+
+        # --- ESTADO 6: Sub-Menú de Cotizaciones ('ia_cotizaciones_sub') ---
+        elif convo.status == 'ia_cotizaciones_sub':
+            sub_opcion = message_body.strip()
+            
+            if sub_opcion == '1':
+                # Autos: Mover a estado de autos y dar respuesta
+                convo.status = 'ia_cotizaciones_autos'
+                db.session.add(convo)
+                return ("chat", _get_cotizacion_detail('1'))
+            elif sub_opcion == '2':
+                # Hogar: Mover a estado de hogar y dar respuesta
+                convo.status = 'ia_cotizaciones_hogar'
+                db.session.add(convo)
+                return ("chat", _get_cotizacion_detail('2'))
+            elif sub_opcion == '3':
+                # Empresa: Mover a estado de empresa y dar respuesta
+                convo.status = 'ia_cotizaciones_empresa'
+                db.session.add(convo)
+                return ("chat", _get_cotizacion_detail('3'))
+            
+            # --- INICIO DE CORRECCIÓN (Lógica para opción 2.4) ---
+            elif sub_opcion == '4':
+                # Mover a un estado de espera, igual que las opciones 1, 3-7
+                response_msg = _get_cotizacion_detail('4')
+                convo.status = 'ia_wait_for_info_opcion_2_4' # Estado específico para Cotizaciones (op 2, sub-op 4)
+                db.session.add(convo)
+                return ("chat", response_msg)
+            # --- FIN DE CORRECCIÓN ---
+            
+            else:
+                # Opción inválida, repetir el sub-menú
+                return ("chat", f"La opción *'{sub_opcion}'* no es válida. Por favor, selecciona un número del 1 al 4.\n\n" + _get_cotizaciones_menu())
+
+        # --- INICIO DE NUEVO BLOQUE DE ESTADOS DE ESPERA ---
+        # --- ESTADO 7: Esperando información para enrutar (Placa, motivo, etc.) ---
+        elif convo.status.startswith('ia_wait_for_info_opcion_'):
+            # El usuario ha escrito la información solicitada (ej. la placa, el motivo de cancelación)
+            # que NO es 'A' (porque 'A' se captura al inicio de la función).
+            # Ahora debemos enrutar al agente.
+            
+            role_name = "General" # Fallback
+            
+            if convo.status == 'ia_wait_for_info_opcion_1':
+                role_name, _ = _get_agent_response_and_role('1')
+            elif convo.status == 'ia_wait_for_info_opcion_3':
+                role_name, _ = _get_agent_response_and_role('3')
+            elif convo.status == 'ia_wait_for_info_opcion_4':
+                role_name, _ = _get_agent_response_and_role('4') # <-- Tu caso
+            elif convo.status == 'ia_wait_for_info_opcion_5':
+                role_name, _ = _get_agent_response_and_role('5')
+            elif convo.status == 'ia_wait_for_info_opcion_6':
+                role_name, _ = _get_agent_response_and_role('6')
+            elif convo.status == 'ia_wait_for_info_opcion_7':
+                role_name, _ = _get_agent_response_and_role('7')
+            elif convo.status == 'ia_wait_for_info_opcion_2_4':
+                # Este es el caso especial de Cotizaciones -> Vida/Salud
+                role_name = "Requieres una cotización"
+
+            # Enrutamos al rol correspondiente.
+            # La acción 'route' hará que el webhook cambie convo.status a 'open'
+            # y el mensaje del usuario (message_body) ya se habrá guardado 
+            # en la BD por el webhook antes de llamar a esta función.
+            return ("route", role_name)
+        # --- FIN DE NUEVO BLOQUE ---
+
+        # --- ESTADOS FINALES DE COTIZACIÓN (Solo esperan 'A' o enrutan) ---
+        elif convo.status in ['ia_cotizaciones_autos', 'ia_cotizaciones_hogar', 'ia_cotizaciones_empresa']:
+            # --- CORRECCIÓN LÓGICA DE ROL ---
+            # Cualquier otro mensaje en estos estados (que no sea 'A') debe enrutar a un agente de cotizaciones
+            return ("route", "Requieres una cotización")
+            # --- FIN DE CORRECCIÓN ---
+
+        # --- ESTADO FALLBACK (Por si acaso) ---
+        else:
+            convo.status = 'ia_greeting' # Reiniciar
+            db.session.add(convo)
+            return ("chat", "Parece que hubo un error. Empecemos de nuevo. ¡Hola! Bienvenido a *VTN SEGUROS*...")
+
+    # --- BLOQUE 'EXCEPT' CORREGIDO ---
+    # Este bloque 'except' está ahora al mismo nivel de indentación que el 'try'
+    except Exception as e:
+        logging.error(f"Error en la máquina de estados de IA: {e}")
+        # Fallback de seguridad: enrutar a General
+        return ("route", "General")
+
+
+# --- WEBHOOK MODIFICADO PARA BAILEYS (CON RECONOCIMIENTO DE 'A' EN CHAT ABIERTO) ---
+@app.route('/api/baileys/webhook', methods=['POST'])
+def baileys_webhook():
+    data = request.json
+    message_body = data.get('Body')
+    sender_phone = data.get('From')
+    message_type = data.get('MessageType', 'text')
+    media_url = data.get('MediaUrl')
+
+
+
+    if (not message_body and not media_url) or not sender_phone:
+        logging.warning("Webhook (Baileys) recibido sin 'Body' o 'MediaUrl', o sin 'From'.")
+        return jsonify({"error": "Faltan 'Body'/'MediaUrl' o 'From'"}), 400
+        
+    logging.info(f"Mensaje (Baileys) recibido de {sender_phone}: {message_body}")
+
+    try:
+        # Escenario A: Chat abierto y asignado a un humano
+        existing_convo = Conversation.query.filter_by(user_phone=sender_phone).order_by(Conversation.created_at.desc()).first()
+        
+        # --- INICIO DE CORRECCIÓN CRÍTICA ---
+        # Si el usuario escribe 'A' y el chat está abierto, lo pasamos al menú IA.
+        if existing_convo and existing_convo.status == 'open' and message_body.strip().upper() == 'A':
+            logging.info(f"Usuario {sender_phone} escribió 'A'. Devolviendo al menú principal.")
+            
+            # Cambiar estado a IA para forzar la respuesta del menú
+            existing_convo.status = 'ia_show_menu'
+            existing_convo.unread_count = 0 # Marcar como leído
+            existing_convo.pending_counted = False # Reiniciar contador
+            
+            # Buscamos el nombre para darle un saludo personalizado
+            display_name = existing_convo.user_display_name or existing_convo.user_phone.split('@')[0].replace('whatsapp:', '').replace('+', '')
+            
+            # Enviamos el mensaje del menú principal
+            menu_message = _get_main_menu(display_name)
+            send_reply(sender_phone, menu_message)
+
+            # Guardar mensaje del usuario (la 'A') y la respuesta del sistema
+            user_msg = Message(conversation_id=existing_convo.id, sender_type='user', content=message_body)
+            system_msg = Message(conversation_id=existing_convo.id, sender_type='system', content=menu_message)
+            db.session.add_all([user_msg, system_msg])
+
+            existing_convo.updated_at = datetime.utcnow()
+            db.session.commit()
+            return jsonify({"status": "returned_to_menu"}), 200
+        
+        if existing_convo and existing_convo.status == 'open':
+            logging.info(f"Conversación ABIERTA (ID: {existing_convo.id}) encontrada para {sender_phone}. Enviando a agente.")
+            
+            # --- INICIO DE CORRECCIÓN ---
+            new_message = Message(conversation_id=existing_convo.id, sender_type='user', content=message_body, message_type=message_type, media_url=media_url)
+            db.session.add(new_message) # <-- AÑADIR ESTA LÍNEA
+            # --- FIN DE CORRECCIÓN ---
+
+            existing_convo.unread_count = (existing_convo.unread_count or 0) + 1
+            existing_convo.updated_at = datetime.utcnow()
+            role = existing_convo.bot_role
+            if role and not existing_convo.pending_counted:
+                role.chats_pending = (role.chats_pending or 0) + 1
+                existing_convo.pending_counted = True
+            db.session.commit()
+            return jsonify({"status": "message_queued"}), 200
+        # --- FIN DE CORRECCIÓN CRÍTICA ---
+
+        bot_config = BotConfig.query.first()
+        if not bot_config or not bot_config.is_active:
+            logging.info("Bot inactivo. Ignorando mensaje.")
+            return jsonify({"status": "bot_inactive"}), 200
+        
+        if existing_convo and existing_convo.status.startswith('ia_'):
+            logging.info(f"Continuando chat IA (ID: {existing_convo.id}, Estado: {existing_convo.status})")
+            convo = existing_convo
+            
+            # Guardar el mensaje del usuario (ej. "Juan Perez", "sí", "1")
+            user_msg = Message(conversation_id=convo.id, sender_type='user', content=message_body, message_type=message_type, media_url=media_url)
+            db.session.add(user_msg) # <-- AÑADIR ESTA LÍNEA
+            
+            # Obtener la respuesta de la máquina de estados
+            action, data = get_ia_response_and_route(convo, message_body)
+
+        # Escenario C: Conversación nueva (o 'closed')
+        else:
+            logging.info(f"Creando nueva conversación IA para {sender_phone}.")
+            general_role = BotRole.query.filter_by(title='General').first()
+            if not general_role:
+                 logging.error("CRÍTICO: No se encontró el rol 'General' para iniciar chats IA.")
+                 return jsonify({"error": "Configuración interna del servidor"}), 500
+
+            # --- Buscar datos anteriores ---
+            previous_data = Conversation.query.filter(
+                Conversation.user_phone == sender_phone,
+                Conversation.user_display_name.isnot(None)
+            ).order_by(Conversation.created_at.desc()).first()
+            
+            convo = Conversation(user_phone=sender_phone, bot_role_id=general_role.id)
+            
+            if previous_data:
+                logging.info(f"Usuario conocido encontrado. Nombre: {previous_data.user_display_name}")
+                # Si lo encontramos, copiamos los datos y saltamos al menú
+                convo.user_display_name = previous_data.user_display_name
+                convo.user_reported_phone = previous_data.user_reported_phone
+                convo.status = 'ia_greeting_known' # El nuevo estado
+            else:
+                # Si no, iniciamos el flujo normal de bienvenida
+                convo.status = 'ia_greeting'
+
+            db.session.add(convo)
+            db.session.flush() # Para obtener el convo.id
+            
+            # Guardar el primer mensaje del usuario (ej. "Hola")
+            user_msg = Message(conversation_id=convo.id, sender_type='user', content=message_body, message_type=message_type, media_url=media_url)
+            db.session.add(user_msg) # <-- AÑADIR ESTA LÍNEA
+            
+            # Obtener la respuesta de la máquina de estados
+            action, data = get_ia_response_and_route(convo, message_body)
+        
+        # --- PROCESAR LA ACCIÓN DE LA IA ---
+        
+        if action == "route":
+            role_title = data
+            
+            # --- INICIO DE LÓGICA DE BALANCEO ---
+            # target_role = BotRole.query.filter_by(title=role_title, status='Activo').first()
+            target_role = get_random_active_role(role_title)
+            # --- FIN DE LÓGICA DE BALANCEO ---
+            
+            if not target_role:
+                # --- MODIFICACIÓN DE LOG ---
+                logging.error(f"IA enrutó a '{role_title}' pero no se encontró ningún rol activo (ni base ni duplicados).")
+                # --- FIN DE MODIFICACIÓN ---
+                ia_response_msg = f"Ups, el departamento de '{role_title}' no está disponible en este momento. ¿Puedo ayudarte con algo más?"
+                send_reply(sender_phone, ia_response_msg)
+                ia_msg_db = Message(conversation_id=convo.id, sender_type='system', content=ia_response_msg)
+                db.session.add(ia_msg_db)
+                db.session.commit()
+                return jsonify({"status": "route_failed"}), 200
+            
+            logging.info(f"IA enrutó chat {convo.id} a '{target_role.title}' (Rol seleccionado: {target_role.title}). Cambiando status a 'open'.")
+            convo.status = 'open'
+            convo.bot_role_id = target_role.id
+            convo.pending_counted = True
+            
+            target_role.chats_received = (target_role.chats_received or 0) + 1
+            target_role.chats_pending = (target_role.chats_pending or 0) + 1
+
+            transfer_message = f"¡Entendido! Un agente del área de {target_role.title} te atenderá pronto."
+            send_reply(sender_phone, transfer_message)
+            
+            system_msg_db = Message(conversation_id=convo.id, sender_type='system', content=f"Chat enrutado por IA a {target_role.title}.")
+            ia_msg_db = Message(conversation_id=convo.id, sender_type='system', content=transfer_message)
+            db.session.add_all([system_msg_db, ia_msg_db])
+            
+        elif action == "route_and_message":
+            # (Este bloque ya no se usa para enrutar, pero se mantiene la lógica de balanceo por si acaso)
+            role_title = data['role']
+            full_response = data['message'] # Es la respuesta completa con formato
+            
+            # --- INICIO DE LÓGICA DE BALANCEO ---
+            # target_role = BotRole.query.filter_by(title=role_title, status='Activo').first()
+            target_role = get_random_active_role(role_title)
+            # --- FIN DE LÓGICA DE BALANCEO ---
+
+            # 1. Enviar mensaje detallado al usuario
+            send_reply(sender_phone, full_response)
+            
+            # 2. Guardar el mensaje en la BD
+            ia_msg_db = Message(conversation_id=convo.id, sender_type='system', content=full_response)
+            db.session.add(ia_msg_db)
+            
+            if not target_role:
+                # --- MODIFICACIÓN DE LOG ---
+                logging.error(f"IA intentó enrutar a '{role_title}' pero no se encontró ningún rol activo (ni base ni duplicados).")
+                # --- FIN DE MODIFICACIÓN ---
+                db.session.commit() 
+                return jsonify({"status": "route_and_message_failed"}), 200
+
+            # 3. Enrutar y cambiar estado a 'open'
+            logging.info(f"IA envió mensaje y enrutó chat {convo.id} a '{target_role.title}' (Rol seleccionado: {target_role.title}). Cambiando status a 'open'.")
+            convo.status = 'open'
+            convo.bot_role_id = target_role.id
+            convo.pending_counted = True
+            
+            target_role.chats_received = (target_role.chats_received or 0) + 1
+            target_role.chats_pending = (target_role.chats_pending or 0) + 1
+            
+            # 4. Registrar enrutamiento en la BD
+            system_msg_db = Message(conversation_id=convo.id, sender_type='system', content=f"Chat enrutado por IA a {target_role.title}.")
+            db.session.add(system_msg_db)
+
+        elif action == "chat":
+            # IA Sigue Chateando (ej. "ask phone", "confirm details", "menu")
+            ia_response_msg = data
+            send_reply(sender_phone, ia_response_msg)
+            # Guardar la respuesta del bot
+            ia_msg_db = Message(conversation_id=convo.id, sender_type='system', content=ia_response_msg)
+            db.session.add(ia_msg_db)
+
+        convo.updated_at = datetime.utcnow()
+        db.session.commit()
+        return jsonify({"status": "ia_processed"}), 200
+
+    except Exception as e:
+        db.session.rollback()
+        logging.error(f"Error fatal en el webhook de Baileys: {e}")
+        logging.exception(e) 
+        return jsonify({"error": "Error interno del servidor"}), 500
+
 @app.route('/api/chats', methods=['GET'])
 @login_required
 def get_chats():
-    status = request.args.get('status', 'open')
-    query = Conversation.query.filter(Conversation.status == status)
-    
-    if current_user.role != 'Admin':
-        assigned_ids = [r.id for r in current_user.assigned_roles]
-        if not assigned_ids: return jsonify([])
-        query = query.filter(Conversation.bot_role_id.in_(assigned_ids))
-    
-    convos = query.order_by(Conversation.updated_at.desc()).all()
-    result = []
-    for c in convos:
-        last = c.get_last_message()
-        # Usar display_name si existe, sino limpiar el teléfono
-        clean_phone = c.user_phone.split('@')[0].replace('whatsapp:', '').replace('+', '')
-        display = c.user_display_name or clean_phone
-        
-        result.append({
-            "id": c.id, "name": display, "phone": c.user_reported_phone or clean_phone,
-            "time": last.timestamp.strftime("%I:%M %p") if last else 'N/A',
-            "unread": c.unread_count, "last_message": last.content if last else "",
-            "bot_role_title": c.bot_role.title if c.bot_role else "N/A"
-        })
-    return jsonify(result)
-
-@app.route('/api/chats/<int:id>/messages', methods=['GET'])
-@login_required
-def get_chat_messages(id):
-    convo = Conversation.query.get_or_404(id)
-    if current_user.role != 'Admin' and convo.bot_role_id not in [r.id for r in current_user.assigned_roles]:
-        return jsonify({"error": "No autorizado"}), 403
-    if convo.status == 'open': convo.unread_count = 0
-    db.session.commit()
-    
-    # RESTAURADO: Usar campos reales
-    return jsonify([{
-        "sender": msg.sender_type, 
-        "text": msg.content, 
-        "type": msg.message_type, 
-        "url": msg.media_url
-    } for msg in convo.messages])
-
-@app.route('/api/chats/<int:id>/messages', methods=['POST'])
-@login_required
-def send_chat_message(id):
-    convo = Conversation.query.get_or_404(id)
-    # Validación de permisos
-    if current_user.role != 'Admin' and convo.bot_role_id not in [r.id for r in current_user.assigned_roles]:
-        return jsonify({"error": "No autorizado"}), 403
-            
-    content = request.get_json().get('text')
-    if not content: return jsonify({"error": "Vacío"}), 400
-
     try:
-        # Reactivar si cerrado
-        if convo.status == 'closed':
-            convo.status = 'open'
-            convo.unread_count = 0 
-            convo.pending_counted = True 
-            if convo.bot_role:
-                convo.bot_role.chats_resolved = max(0, convo.bot_role.chats_resolved - 1)
-                convo.bot_role.chats_pending += 1
+        chat_status = request.args.get('status', 'open') 
+        if chat_status not in ['open', 'closed']:
+            chat_status = 'open'
 
-        # Enviar a Baileys
-        if send_reply(convo.user_phone, content):
-            # RESTAURADO: Guardar como 'agent'
-            db.session.add(Message(conversation_id=convo.id, sender_type='agent', content=content))
-            convo.updated_at = datetime.utcnow()
-            db.session.commit()
-            return jsonify({"success": True, "message": {"sender": "agent", "text": content}}), 201
+        conversations_query = None
+        if current_user.role == 'Admin':
+            conversations_query = Conversation.query.filter_by(status=chat_status).options(
+                db.joinedload(Conversation.messages),
+                db.joinedload(Conversation.bot_role)
+            )
         else:
-             return jsonify({"error": "Fallo envío a Baileys"}), 500
-    
+            assigned_role_ids = [role.id for role in current_user.assigned_roles]
+            if assigned_role_ids:
+                conversations_query = Conversation.query.filter(
+                    Conversation.bot_role_id.in_(assigned_role_ids),
+                    Conversation.status == chat_status
+                ).options(
+                    db.joinedload(Conversation.messages),
+                    db.joinedload(Conversation.bot_role)
+                )
+            else:
+                logging.info(f"Usuario {current_user.username} (Soporte) no tiene roles asignados.")
+                return jsonify([]) 
+
+        if conversations_query is None:
+             return jsonify([])
+
+        open_conversations = conversations_query.order_by(Conversation.updated_at.desc()).all()
+        
+        chat_list = []
+        for convo in open_conversations:
+            last_msg = convo.get_last_message()
+            
+            # --- INICIO DE MODIFICACIÓN ---
+            # Fallback JID (el ID ...@lid)
+            clean_phone = convo.user_phone.split('@')[0].replace('whatsapp:', '').replace('+', '')
+            
+            # Usar el nombre/teléfono reportado si existe, si no, el JID
+            display_name = convo.user_display_name or clean_phone
+            display_phone = convo.user_reported_phone or clean_phone
+            # --- FIN DE MODIFICACIÓN ---
+            
+            chat_list.append({
+                "id": convo.id,
+                "name": display_name,  # <-- MODIFICADO
+                "phone": display_phone, # <-- MODIFICADO
+                "time": last_msg.timestamp.strftime("%I:%M %p") if last_msg and last_msg.timestamp else 'N/A',
+                "unread": convo.unread_count or 0,
+                "last_message": last_msg.content if last_msg else "Sin mensajes",
+                "updated_at": convo.updated_at.isoformat() if convo.updated_at else convo.created_at.isoformat(),
+                "bot_role_id": convo.bot_role_id,
+                "bot_role_title": convo.bot_role.title if convo.bot_role else "N/A"
+            })
+        return jsonify(chat_list)
     except Exception as e:
-        db.session.rollback()
+        logging.error(f"Error en /api/chats: {e}")
+        logging.exception(e) 
         return jsonify({"error": str(e)}), 500
 
-@app.route('/api/chats/<int:id>/resolve', methods=['POST'])
+@app.route('/api/chats/<int:convo_id>/messages', methods=['GET'])
 @login_required
-def resolve_chat(id):
-    convo = Conversation.query.get_or_404(id)
-    convo.status = 'closed'
-    if convo.bot_role:
-        convo.bot_role.chats_resolved += 1
-        if convo.pending_counted: convo.bot_role.chats_pending -= 1
+def get_chat_messages(convo_id):
+    convo = Conversation.query.get_or_404(convo_id)
+    if current_user.role != 'Admin':
+        assigned_role_ids = [role.id for role in current_user.assigned_roles]
+        if convo.bot_role_id not in assigned_role_ids:
+            return jsonify({"error": "No autorizado para ver este chat"}), 403
+            
+    if convo.status == 'open' and convo.unread_count > 0:
+        convo.unread_count = 0
+    
+    if convo.status == 'open' and convo.pending_counted:
+        role = convo.bot_role
+        if role and role.chats_pending > 0:
+            role.chats_pending = role.chats_pending - 1
+        convo.pending_counted = False
+        
     db.session.commit()
-    return jsonify({"success": True})
+    
+    # --- MODIFICADO: Enviar tipo de mensaje y URL ---
+    messages = [
+        {
+            "sender": msg.sender_type, 
+            "text": msg.content, 
+            "type": msg.message_type, 
+            "url": msg.media_url
+        } 
+        for msg in convo.messages
+    ]
+    # --- FIN DE MODIFICACIÓN ---
+    
+    return jsonify(messages)
 
+
+# --- NUEVA: API PARA BUSCAR DATOS DE PÓLIZA ASOCIADOS AL CHAT ---
 @app.route('/api/chats/<int:convo_id>/search_policy_data', methods=['GET'])
 @login_required
 def search_policy_data_for_chat(convo_id):
     convo = Conversation.query.get_or_404(convo_id)
-    name = convo.user_display_name
-    if not name: return jsonify([])
-    records = PolicyData.query.filter(PolicyData.nombres.ilike(f"%{name}%")).all()
-    return jsonify([{
-        "aseguradora": r.aseguradora, "nombres": r.nombres, "placa": r.placa, "fecha_venc": r.fecha_venc
-    } for r in records])
+    
+    # Verificar permisos
+    if current_user.role != 'Admin':
+        assigned_role_ids = [role.id for role in current_user.assigned_roles]
+        if convo.bot_role_id not in assigned_role_ids:
+            return jsonify({"error": "No autorizado para este chat"}), 403
+            
+    # Usar el 'user_display_name' guardado en la conversación
+    search_name = convo.user_display_name
+    
+    if not search_name:
+        logging.warning(f"Intento de búsqueda de póliza para chat {convo_id} sin user_display_name.")
+        return jsonify([]) # Devolver lista vacía si no hay nombre para buscar
 
-# --- CARGA CSV ---
+    try:
+        search_pattern = f"%{search_name}%"
+        logging.info(f"Buscando en PolicyData por nombre: {search_pattern}")
+        
+        # Busca cualquier nombre que 'contenga' el nombre del chat
+        records = PolicyData.query.filter(
+            PolicyData.nombres.ilike(search_pattern)
+        ).order_by(PolicyData.nombres).all()
+        
+        results = [
+            {
+                "aseguradora": r.aseguradora,
+                "nombres": r.nombres,
+                "cedula_nit": r.cedula_nit,
+                "tipo": r.tipo,
+                "placa": r.placa,
+                "modelo": r.modelo,
+                "valor_poliza": r.valor_poliza,
+                "mes_vencimiento": r.mes_vencimiento,
+                "fecha_venc": r.fecha_venc,
+                "referencia": r.referencia
+            } for r in records
+        ]
+        
+        logging.info(f"Búsqueda para '{search_pattern}' encontró {len(results)} registros.")
+        return jsonify(results)
+        
+    except Exception as e:
+        logging.error(f"Error en /api/chats/{convo_id}/search_policy_data: {e}")
+        return jsonify({"error": str(e)}), 500
+# --- FIN DE NUEVA API ---
+
+
+
+
+# --- FUNCIÓN DE ENVÍO DE MENSAJES (Agente Humano) ---
+# (Esta función ya era correcta para la arquitectura de Baileys)
+@app.route('/api/chats/<int:convo_id>/messages', methods=['POST'])
+@login_required
+def send_chat_message(convo_id):
+    convo = Conversation.query.get_or_404(convo_id)
+    
+    # Lógica de permisos
+    if current_user.role != 'Admin':
+        assigned_role_ids = [role.id for role in current_user.assigned_roles]
+        if convo.bot_role_id not in assigned_role_ids:
+            return jsonify({"error": "No autorizado para enviar a este chat"}), 403
+            
+    data = request.get_json()
+    content = data.get('text')
+    if not content: return jsonify({"error": "El texto no puede estar vacío"}), 400
+
+    # Obtener la URL del bot de Baileys desde las variables de entorno
+    baileys_bot_url = os.getenv('BAILEYS_BOT_URL')
+    if not baileys_bot_url:
+        logging.error("BAILEYS_BOT_URL no está configurada. No se puede enviar mensaje.")
+        return jsonify({"error": "El servicio de envío no está configurado"}), 500
+
+    try:
+        # Reactivar chat si está cerrado
+        if convo.status == 'closed':
+            logging.info(f"Reactivando chat {convo_id} (estado 'closed') por {current_user.name}.")
+            convo.status = 'open'
+            convo.unread_count = 0 
+            convo.pending_counted = True 
+            
+            role = convo.bot_role
+            if role:
+                # Revertir contadores
+                if role.chats_resolved and role.chats_resolved > 0:
+                    role.chats_resolved = role.chats_resolved - 1
+                role.chats_pending = (role.chats_pending or 0) + 1
+                logging.info(f"Contadores del Rol '{role.title}' actualizados: Pendientes={role.chats_pending}, Resueltos={role.chats_resolved}")
+
+        # --- REEMPLAZO DE TWILIO ---
+        # Hacemos una petición POST al endpoint /send de nuestro bot.js
+        
+        send_url = f"{baileys_bot_url}/send"
+        payload = {
+            "number": convo.user_phone, # app.py ya lo guarda como 'whatsapp:+...'
+            "message": content
+        }
+        
+        # --- CORRECCIÓN DE TIMEOUT ---
+        # Aumentamos el timeout a 30 segundos para manejar el "cold start" de OnRender
+        response = requests.post(send_url, json=payload, timeout=30)
+        
+        # Si el bot de Baileys da error, lo reportamos
+        if response.status_code != 200:
+            raise Exception(f"El bot de Baileys respondió con {response.status_code}: {response.text}")
+        # --- FIN DE REEMPLAZO ---
+        
+        new_message = Message(conversation_id=convo.id, sender_type='agent', content=content)
+        db.session.add(new_message)
+        convo.updated_at = datetime.utcnow()
+        
+        db.session.commit()
+        return jsonify({"success": True, "message": {"sender": "agent", "text": content}}), 201
+    
+    except Exception as e:
+        logging.error(f"Error al enviar mensaje (vía Baileys) o guardar en BD: {e}")
+        db.session.rollback()
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/chats/<int:convo_id>/resolve', methods=['POST'])
+@login_required
+def resolve_chat(convo_id):
+    convo = Conversation.query.get_or_404(convo_id)
+    if current_user.role != 'Admin':
+        assigned_role_ids = [role.id for role in current_user.assigned_roles]
+        if convo.bot_role_id not in assigned_role_ids:
+            return jsonify({"error": "No autorizado para resolver este chat"}), 403
+    try:
+        convo.status = 'closed'
+        role = convo.bot_role
+        if role:
+            role.chats_resolved = (role.chats_resolved or 0) + 1
+            if convo.pending_counted and role.chats_pending > 0:
+                role.chats_pending = role.chats_pending - 1
+                convo.pending_counted = False
+        db.session.commit()
+        logging.info(f"Chat ID {convo_id} marcado como resuelto. Rol '{role.title if role else 'N/A'}' - Pendientes: {role.chats_pending if role else 'N/A'}, Resueltos: {role.chats_resolved if role else 'N/A'}")
+        return jsonify({"success": True, "message": "Chat archivado."})
+    except Exception as e:
+        db.session.rollback()
+        logging.error(f"Error al resolver chat {convo_id}: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/chats/<int:convo_id>/transfer', methods=['POST'])
+@login_required
+def transfer_chat(convo_id):
+    convo = Conversation.query.get_or_404(convo_id)
+    data = request.get_json()
+    target_role_id = data.get('target_role_id')
+
+    if not target_role_id:
+        return jsonify({"error": "Falta el ID del rol de destino"}), 400
+
+    if current_user.role != 'Admin':
+         assigned_role_ids = [role.id for role in current_user.assigned_roles]
+         if convo.bot_role_id not in assigned_role_ids:
+             return jsonify({"error": "No autorizado para transferir este chat"}), 403
+
+    try:
+        original_role = convo.bot_role
+        target_role = BotRole.query.get(target_role_id)
+
+        if not target_role:
+            return jsonify({"error": "Rol de destino no encontrado"}), 404
+        if original_role and original_role.id == target_role.id:
+            return jsonify({"error": "No se puede transferir al mismo rol"}), 400
+
+        if original_role:
+            if convo.pending_counted and original_role.chats_pending > 0:
+                original_role.chats_pending = original_role.chats_pending - 1
+        
+        target_role.chats_pending = (target_role.chats_pending or 0) + 1
+        
+        convo.bot_role_id = target_role.id
+        convo.pending_counted = True 
+        convo.updated_at = datetime.utcnow() 
+        
+        system_message = Message(
+            conversation_id=convo.id,
+            sender_type='system',
+            content=f"Chat transferido de '{original_role.title if original_role else 'N/A'}' a '{target_role.title}' por {current_user.name}."
+        )
+        db.session.add(system_message)
+        
+        db.session.commit()
+        logging.info(f"Chat ID {convo_id} transferido de Rol ID {original_role.id if original_role else 'N/A'} a Rol ID {target_role.id}.")
+        
+        return jsonify({"success": True, "message": "Chat transferido correctamente."})
+
+    except Exception as e:
+        db.session.rollback()
+        logging.error(f"Error al transferir chat {convo_id}: {e}")
+        return jsonify({"error": str(e)}), 500
+
+# --- INICIO DE MODIFICACIÓN: APIs de Importación de Chat ELIMINADAS ---
 @app.route('/api/admin/upload_database', methods=['POST'])
 @login_required
 def upload_database():
-    if check_admin(): return check_admin()
-    if 'file' not in request.files: return jsonify({"error": "No file"}), 400
-    file = request.files['file']
-    if not file.filename: return jsonify({"error": "No filename"}), 400
+    admin_check = check_admin()
+    if admin_check: return admin_check
+
+    try:
+        if 'file' not in request.files:
+            return jsonify({"error": "No se encontró el archivo"}), 400
+        
+        file = request.files['file']
+        
+        if not file or file.filename == '':
+            return jsonify({"error": "No se seleccionó ningún archivo"}), 400
+        
+        # --- INICIO DE MODIFICACIÓN: Lógica de CSV ---
+        # Nombres de columna esperados (los encabezados en A1, B1, C1...)
+        expected_columns = [
+            'ASEGURADORA', 'NOMBRES', 'CEDULA/NIT', 'TIPO', 'PLACA', 
+            'MODELO', 'VLOR POLIZA', 'MES VENCIMIENTO', 'FECHA VENC', 'REFERENCIA'
+        ]
+        
+        df = None
+        
+        try:
+            # Primero, intentar con coma (estándar UTF-8)
+            file.seek(0) # Asegurar que el puntero esté al inicio
+            df = pd.read_csv(file, header=0, dtype=str, encoding='utf-8', sep=',').fillna('')
+            
+            # Si solo hay una columna, es probable que el separador sea incorrecto.
+            # Probar con punto y coma (común en Excel de Windows/Latam).
+            if len(df.columns) <= 1:
+                logging.warning("Detectada una sola columna con coma. Reintentando con punto y coma.")
+                file.seek(0) # Resetear puntero
+                df = pd.read_csv(file, header=0, dtype=str, encoding='utf-8', sep=';').fillna('')
+                
+        except UnicodeDecodeError:
+            # Si falla UTF-8, probar con latin-1, (muy común en Excel de Windows)
+            logging.warning("Error con UTF-8. Reintentando con 'latin-1' y punto y coma.")
+            try:
+                file.seek(0)
+                # Probar latin-1 con punto y coma primero
+                df = pd.read_csv(file, header=0, dtype=str, encoding='latin-1', sep=';').fillna('')
+                if len(df.columns) <= 1:
+                    logging.warning("Detectada una sola columna (latin-1) con punto y coma. Reintentando con coma.")
+                    file.seek(0)
+                    df = pd.read_csv(file, header=0, dtype=str, encoding='latin-1', sep=',').fillna('')
+            except Exception as e:
+                 logging.error(f"Error final al leer CSV (latin-1): {e}")
+                 return jsonify({"error": f"Error al leer el archivo. Intente guardar como 'CSV (Delimitado por comas)' o 'CSV (UTF-8)' desde Excel. Error: {e}"}), 400
+        except Exception as e:
+            logging.error(f"Error al leer el CSV: {e}")
+            return jsonify({"error": f"Error al procesar el archivo CSV: {e}"}), 400
+        # --- FIN DE MODIFICACIÓN ---
+
+        if df is None:
+             return jsonify({"error": "No se pudo procesar el DataFrame."}), 500
+
+        # Verificar columnas después de cargar
+        if not all(col in df.columns for col in expected_columns):
+            logging.warning(f"Columnas faltantes. Esperadas: {expected_columns}. Encontradas: {list(df.columns)}")
+            return jsonify({"error": f"El archivo CSV debe tener las columnas exactas (sensible a mayúsculas): {', '.join(expected_columns)}"}), 400
+            
+        # 1. Borrar todos los datos antiguos
+        PolicyData.query.delete()
+        logging.info("Base de datos de pólizas anterior eliminada.")
+        
+        # 2. Insertar nuevos datos
+        records_added = 0
+        for index, row in df.iterrows():
+            new_record = PolicyData(
+                aseguradora=row['ASEGURADORA'],
+                nombres=row['NOMBRES'],
+                cedula_nit=row['CEDULA/NIT'],
+                tipo=row['TIPO'],
+                placa=row['PLACA'],
+                modelo=row['MODELO'],
+                valor_poliza=row['VLOR POLIZA'],
+                mes_vencimiento=row['MES VENCIMIENTO'],
+                fecha_venc=row['FECHA VENC'],
+                referencia=row['REFERENCIA']
+            )
+            db.session.add(new_record)
+            records_added += 1
+        
+        db.session.commit()
+        
+        logging.info(f"Base de datos de pólizas cargada. {records_added} registros añadidos.")
+        return jsonify({"success": True, "message": f"Base de datos cargada con éxito. Se añadieron {records_added} registros."})
+
+    except Exception as e:
+        db.session.rollback()
+        logging.error(f"Error fatal en /api/admin/upload_database: {e}")
+        logging.exception(e)
+        return jsonify({"error": f"Error interno del servidor: {e}"}), 500
+
+@app.route('/api/database_records', methods=['GET'])
+@login_required
+def get_database_records():
+    # Esta ruta es accesible tanto por Admin como por Soporte
+    search_term = request.args.get('search', '').strip()
     
     try:
-        df = None
-        try:
-            df = pd.read_csv(file, header=0, dtype=str, encoding='utf-8', sep=',').fillna('')
-            if len(df.columns) <= 1:
-                file.seek(0)
-                df = pd.read_csv(file, header=0, dtype=str, encoding='utf-8', sep=';').fillna('')
-        except:
-            file.seek(0)
-            df = pd.read_csv(file, header=0, dtype=str, encoding='latin-1', sep=';').fillna('')
+        query = PolicyData.query
         
-        PolicyData.query.delete()
-        for _, row in df.iterrows():
-            db.session.add(PolicyData(
-                aseguradora=row.get('ASEGURADORA'), nombres=row.get('NOMBRES'),
-                cedula_nit=row.get('CEDULA/NIT'), tipo=row.get('TIPO'),
-                placa=row.get('PLACA'), modelo=row.get('MODELO'),
-                valor_poliza=row.get('VLOR POLIZA'), mes_vencimiento=row.get('MES VENCIMIENTO'),
-                fecha_venc=row.get('FECHA VENC'), referencia=row.get('REFERENCIA')
-            ))
-        db.session.commit()
-        return jsonify({"success": True})
+        if search_term:
+            search_pattern = f"%{search_term}%"
+            query = query.filter(
+                or_(
+                    PolicyData.nombres.ilike(search_pattern),
+                    PolicyData.cedula_nit.ilike(search_pattern),
+                    PolicyData.placa.ilike(search_pattern)
+                )
+            )
+            
+        records = query.order_by(PolicyData.nombres).all()
+        
+        # Convertir objetos a diccionarios
+        results = [
+            {
+                "id": r.id,
+                "aseguradora": r.aseguradora,
+                "nombres": r.nombres,
+                "cedula_nit": r.cedula_nit,
+                "tipo": r.tipo,
+                "placa": r.placa,
+                "modelo": r.modelo,
+                "valor_poliza": r.valor_poliza,
+                "mes_vencimiento": r.mes_vencimiento,
+                "fecha_venc": r.fecha_venc,
+                "referencia": r.referencia
+            } for r in records
+        ]
+        
+        return jsonify(results)
+        
     except Exception as e:
+        logging.error(f"Error en /api/database_records: {e}")
         return jsonify({"error": str(e)}), 500
 
-# --- DASHBOARD APIs ---
+@app.route('/api/database_records/<int:id>', methods=['PUT'])
+@login_required
+def update_database_record(id):
+    # Soporte y Admin pueden editar
+    record = PolicyData.query.get_or_404(id)
+    data = request.get_json()
+    
+    try:
+        record.aseguradora = data.get('aseguradora', record.aseguradora)
+        record.nombres = data.get('nombres', record.nombres)
+        record.cedula_nit = data.get('cedula_nit', record.cedula_nit)
+        record.tipo = data.get('tipo', record.tipo)
+        record.placa = data.get('placa', record.placa)
+        record.modelo = data.get('modelo', record.modelo)
+        record.valor_poliza = data.get('valor_poliza', record.valor_poliza)
+        record.mes_vencimiento = data.get('mes_vencimiento', record.mes_vencimiento)
+        record.fecha_venc = data.get('fecha_venc', record.fecha_venc)
+        record.referencia = data.get('referencia', record.referencia)
+        
+        db.session.commit()
+        return jsonify({"success": True, "message": "Registro actualizado."})
+        
+    except Exception as e:
+        db.session.rollback()
+        logging.error(f"Error actualizando registro {id}: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/database_records/<int:id>', methods=['DELETE'])
+@login_required
+def delete_database_record(id):
+    # Soporte y Admin pueden borrar
+    record = PolicyData.query.get_or_404(id)
+    
+    try:
+        db.session.delete(record)
+        db.session.commit()
+        return jsonify({"success": True, "message": "Registro eliminado."})
+        
+    except Exception as e:
+        db.session.rollback()
+        logging.error(f"Error eliminando registro {id}: {e}")
+        return jsonify({"error": str(e)}), 500
+
+# --- FIN DE NUEVAS APIS ---
+
+
+# --- APIs DE DASHBOARD ---
 @app.route('/api/dashboard/soporte')
 @login_required
 def get_soporte_dashboard_data():
-    # (Lógica simplificada para brevedad, pero funcional)
-    return jsonify({"stats": {"today": 0, "week": 0, "month": 0}, "lineChart": {"labels": [], "data": []}, "barChart": {"labels": [], "data": []}})
+    try:
+        assigned_role_ids = []
+        if current_user.role == 'Admin':
+            assigned_role_ids = [role.id for role in BotRole.query.all()]
+        else:
+            assigned_role_ids = [role.id for role in current_user.assigned_roles]
+        if not assigned_role_ids:
+            return jsonify({"stats": {"today": 0, "week": 0, "month": 0}, "lineChart": {"labels": [], "data": []}, "barChart": {"labels": [], "data": []}})
+        today = datetime.utcnow().date()
+        start_of_today = datetime(today.year, today.month, today.day)
+        start_of_week = start_of_today - timedelta(days=today.weekday())
+        start_of_month = datetime(today.year, today.month, 1)
+        messages_today = Message.query.join(Conversation).filter(Message.timestamp >= start_of_today, Conversation.bot_role_id.in_(assigned_role_ids)).count()
+        messages_week = Message.query.join(Conversation).filter(Message.timestamp >= start_of_week, Conversation.bot_role_id.in_(assigned_role_ids)).count()
+        messages_month = Message.query.join(Conversation).filter(Message.timestamp >= start_of_month, Conversation.bot_role_id.in_(assigned_role_ids)).count()
+        labels = []
+        data = []
+        for i in range(6, -1, -1):
+            day = start_of_today - timedelta(days=i)
+            next_day = day + timedelta(days=1)
+            count = Message.query.join(Conversation).filter(Message.timestamp >= day, Message.timestamp < next_day, Conversation.bot_role_id.in_(assigned_role_ids)).count()
+            labels.append(day.strftime("%a"))
+            data.append(count)
+        line_chart = {"labels": labels, "data": data}
+        role_data = db.session.query(BotRole.title, func.count(Conversation.id)).join(Conversation, BotRole.id == Conversation.bot_role_id).filter(BotRole.id.in_(assigned_role_ids)).group_by(BotRole.title).all()
+        bar_chart = {"labels": [r[0] for r in role_data], "data": [r[1] for r in role_data]}
+        return jsonify({"stats": {"today": messages_today, "week": messages_week, "month": messages_month}, "lineChart": line_chart, "barChart": bar_chart})
+    except Exception as e:
+        logging.error(f"Error en /api/dashboard/soporte: {e}")
+        return jsonify({"error": str(e)}), 500
 
 @app.route('/api/dashboard/admin')
 @login_required
 def get_admin_dashboard_data():
-    if check_admin(): return check_admin()
-    # (Lógica simplificada)
-    return jsonify({"stats": {"asistentes_activos": 0}, "lineChart": {}, "barChart": {}, "table_data": []})
+    admin_check = check_admin()
+    if admin_check: return admin_check
+    try:
+        today = datetime.utcnow().date()
+        start_of_today = datetime(today.year, today.month, today.day)
+        stats_asistentes_activos = User.query.filter_by(role='Soporte').count()
+        stats_chats_hoy = Conversation.query.filter(Conversation.created_at >= start_of_today).count()
+        stats_chats_resueltos = db.session.query(func.sum(BotRole.chats_resolved)).scalar() or 0
+        labels = []
+        data = []
+        for i in range(6, -1, -1):
+            day = start_of_today - timedelta(days=i)
+            next_day = day + timedelta(days=1)
+            count = Conversation.query.filter(Conversation.created_at >= day, Conversation.created_at < next_day).count()
+            labels.append(day.strftime("%a"))
+            data.append(count)
+        line_chart = {"labels": labels, "data": data}
+        role_data = db.session.query(BotRole.title, func.count(Conversation.id)).join(Conversation, BotRole.id == Conversation.bot_role_id).group_by(BotRole.title).all()
+        bar_chart = {"labels": [r[0] for r in role_data], "data": [r[1] for r in role_data]}
+        table_data = []
+        latest_convos = Conversation.query.order_by(Conversation.created_at.desc()).limit(5).all()
+        for convo in latest_convos:
+            assignee_name = "N/A"
+            role_title = "N/A"
+            if convo.bot_role:
+                role_title = convo.bot_role.title
+                if convo.bot_role.assignee:
+                    assignee_name = convo.bot_role.assignee.name
+            table_data.append({"id": f"#{convo.id:04d}", "assignee": assignee_name, "role": role_title, "status": convo.status.capitalize()})
+        return jsonify({"stats": {"asistentes_activos": stats_asistentes_activos, "chats_hoy": stats_chats_hoy, "chats_resueltos": stats_chats_resueltos}, "lineChart": line_chart, "barChart": bar_chart, "table_data": table_data})
+    except Exception as e:
+        logging.error(f"Error en /api/dashboard/admin: {e}")
+        return jsonify({"error": str(e)}), 500
 
-# --- INICIALIZACIÓN ---
+
+# --- INICIALIZACIÓN DE LA APLICACIÓN ---
 def init_db(app_instance):
     with app_instance.app_context():
-        db.create_all()
-        if not User.query.filter_by(username='admin').first():
-            db.session.add(User(username='admin', password='admin', name='Admin', role='Admin'))
-            db.session.add(User(username='soporte', password='soporte', name='Soporte', role='Soporte'))
-            db.session.add(BotConfig(is_active=True, whatsapp_number="123", welcome_message="Hola"))
-            db.session.add(BotRole(title='General', status='Activo'))
-            roles = ["Presentas un accidente o requieres asistencia", "Requieres una cotización", "Continuar con proceso de compra", 
-                     "Inquietudes de tu póliza, certificados, coberturas, pagos y renovaciones", "Consultar estado de siniestro/Financiaciones y pagos",
-                     "Solicitud de cancelación de póliza y reintegro de dinero", "Comunicarse directamente con asesor por motivo de quejas y peticiones"]
-            for r in roles:
-                if not BotRole.query.filter_by(title=r).first(): db.session.add(BotRole(title=r, status='Activo'))
+        try:
+            db.create_all() # <-- Esto creará la nueva tabla PolicyData
+            logging.info("Tablas de la base de datos verificadas/creadas.")
+            if not User.query.filter_by(role='Admin').first():
+                logging.info("Creando usuario 'admin' por defecto.")
+                db.session.add(User(username='admin', password='admin', name='Administrador', role='Admin'))
+            if not User.query.filter_by(role='Soporte').first():
+                logging.info("Creando usuario 'soporte' por defecto.")
+                db.session.add(User(username='soporte', password='soporte', name='Agente de Soporte', role='Soporte'))
+            if not BotConfig.query.first():
+                logging.info("Creando configuración de bot por defecto.")
+                db.session.add(BotConfig(is_active=True, whatsapp_number="+573132217862", welcome_message="¡Hola! Bienvenido a nuestro servicio de atención. ¿En qué puedo ayudarte hoy?"))
+            
+            if not BotRole.query.filter_by(title='General').first():
+                logging.info("Creando rol por defecto: 'General'")
+                db.session.add(BotRole(title='General', knowledge_base='Preguntas frecuentes o chat inicial.', status='Activo'))
+
+            # --- CORRECCIÓN DE ROLES DEFAULT ---
+            # Asegurarse que los roles base del flujo IA existan.
+            roles_default_ia = [
+                "Presentas un accidente o requieres asistencia",
+                "Requieres una cotización",
+                "Continuar con proceso de compra",
+                "Inquietudes de tu póliza, certificados, coberturas, pagos y renovaciones",
+                "Consultar estado de siniestro/Financiaciones y pagos",
+                "Solicitud de cancelación de póliza y reintegro de dinero",
+                "Comunicarse directamente con asesor por motivo de quejas y peticiones"
+            ]
+            
+            for title in roles_default_ia:
+                if not BotRole.query.filter_by(title=title).first():
+                    logging.info(f"Creando rol por defecto (del flujo IA): '{title}'")
+                    db.session.add(BotRole(title=title, knowledge_base=f'Rol para manejar la opción: {title}', status='Activo'))
+            
             db.session.commit()
+        except Exception as e:
+            db.session.rollback()
+            logging.error(f"Error durante la inicialización de la BD: {e}")
 
 init_db(app)
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 5000)), debug=False)
+    port = int(os.environ.get('PORT', 5000))
+    app.run(host='0.0.0.0', port=port, debug=False)
