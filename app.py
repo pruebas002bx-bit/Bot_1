@@ -593,59 +593,83 @@ def get_ia_response_and_route(convo, message_body):
 
         # --- ESTADO 0: Saludo (Usuario Conocido) ('ia_greeting_known') ---
         if convo.status == 'ia_greeting_known':
-            convo.status = 'ia_show_menu' 
-            db.session.add(convo)
-            return ("chat", _get_main_menu(convo.user_display_name))
-
-        # --- ESTADO 1: Saludo Inicial y Petición de Datos ('ia_greeting') ---
-        elif convo.status == 'ia_greeting':
-            convo.status = 'ia_wait_for_details' # Nuevo estado de espera
+            # Si tiene nombre guardado, saltamos directo al menú.
+            if convo.user_display_name:
+                convo.status = 'ia_show_menu' 
+                db.session.add(convo)
+                return ("chat", _get_main_menu(convo.user_display_name))
+            else:
+                 # Si no tiene nombre (chat viejo o solo teléfono), lo pasamos al nuevo saludo
+                 convo.status = 'ia_greeting'
+                 db.session.add(convo)
+                 # Caerá en el bloque 'ia_greeting' de abajo para saludar y pedir placa/opción
+                 
+        # --- ESTADO 1: Saludo Inicial y Petición de Placa/Opción 2 ('ia_greeting') ---
+        if convo.status == 'ia_greeting':
+            convo.status = 'ia_wait_for_placa_or_2' # Nuevo estado de espera
             db.session.add(convo)
             
-            # Nuevo mensaje unificado
+            # Nuevo mensaje de bienvenida
             welcome_msg = (
-                "¡Hola! Bienvenido a *VTN SEGUROS - Grupo Montenegro*. Para nosotros es un gusto atenderte.\n\n"
-                "Para brindarte un mejor servicio, por favor indícame tus datos en un *solo mensaje* siguiendo este formato:\n\n"
-                "*Tu Nombre Completo, Tu Celular, Placa de tu vehículo* (si aplica)\n\n"
-                "Por ejemplo:\n"
-                "```Juan Perez, 3001234567, ABC123```\n"
-                "O si no tienes vehículo:\n"
-                "```Maria Lopez, 3109876543```\n\n"
-                "*(Usa comas ',' para separar los datos, por favor)*"
+                "¡Hola! Bienvenido a *VTN SEGUROS - Grupo Montenegro*. Para nosotros es un gusto atenderte 🫡\n\n"
+                "¿Ya eres cliente de nosotros? 🤔\n\n"
+                "*Si eres cliente, por favor ingresa tu número de placa.*\n"
+                "*Si eres cliente nuevo, por favor ingresa el número 2* y te remitiremos con uno de nuestros asistentes. 🤝"
             )
             return ("chat", welcome_msg)
         
+        
+        # --- ESTADO 2: Esperando la Placa o el '2' ('ia_wait_for_placa_or_2') ---
+        elif convo.status == 'ia_wait_for_placa_or_2':
+            user_input = message_body.strip().upper()
 
-        # --- ESTADO 2: Esperando los detalles unificados ('ia_wait_for_details') ---
-        elif convo.status == 'ia_wait_for_details':
-            # Separar el input del usuario por comas
-            parts = [p.strip() for p in message_body.strip().split(',')]
-            
-            # Verificar si el formato es mínimamente correcto (Nombre y Celular)
-            if len(parts) >= 2:
-                # El formato es correcto, guardamos los datos
-                convo.user_display_name = parts[0]
-                convo.user_reported_phone = parts[1]
-                # La placa (parts[2]), si existe, quedará registrada en el historial del chat
+            # Opción 2: Cliente Nuevo
+            if user_input == '2':
+                logging.info(f"Usuario {convo.user_phone} es cliente nuevo. Enrutando a Cotizaciones.")
+                # El mensaje del usuario (el '2') ya está guardado.
+                # Establecemos un nombre temporal si no existe para el saludo de la respuesta IA.
+                if not convo.user_display_name:
+                    convo.user_display_name = "Cliente Nuevo" 
+                    convo.user_reported_phone = convo.user_phone.split('@')[0].replace('whatsapp:', '').replace('+', '')
+                    db.session.add(convo)
                 
-                convo.status = 'ia_show_menu' # Avanzar al menú principal
-                db.session.add(convo)
+                # Respuesta de IA y enrutamiento
+                role_name = "Requieres una cotización"
+                response_msg = f"¡Perfecto! Un agente del área de *{role_name}* te contactará en breve para ayudarte con tu cotización. 👋"
                 
-                # Devolver el menú principal
-                return ("chat", _get_main_menu(convo.user_display_name))
+                # La acción 'route' hará que el webhook cambie convo.status a 'open'
+                return ("route_and_message", {"role": role_name, "message": response_msg})
             
+            # Cualquier otra entrada se trata como una PLACA (Placa Cliente Existente)
             else:
-                # El formato es incorrecto, volver a pedir
-                # El estado no cambia, se mantiene en 'ia_wait_for_details'
+                logging.info(f"Usuario {convo.user_phone} ingresó: {user_input}. Buscando en PolicyData.")
                 
-                retry_msg = (
-                    "No pude entender tus datos. 😟 Por favor, asegúrate de usar el formato correcto, separando cada dato con una *coma* (',').\n\n"
-                    "Formato:\n"
-                    "*Tu Nombre Completo, Tu Celular, Placa de tu vehículo* (si aplica)\n\n"
-                    "Por ejemplo:\n"
-                    "```Juan Perez, 3001234567, ABC123```"
-                )
-                return ("chat", retry_msg)
+                # Buscar la placa en la base de datos
+                policy_record = PolicyData.query.filter(
+                    PolicyData.placa.ilike(user_input)
+                ).first()
+                
+                if policy_record:
+                    logging.info(f"Placa '{user_input}' encontrada. Nombre: {policy_record.nombres}")
+                    
+                    # 1. Actualizar datos del usuario
+                    convo.user_display_name = policy_record.nombres
+                    convo.user_reported_phone = convo.user_phone.split('@')[0].replace('whatsapp:', '').replace('+', '') # Mantenemos el teléfono de WhatsApp por defecto
+                    convo.status = 'ia_show_menu' # Avanzar al menú principal
+                    db.session.add(convo)
+                    
+                    # 2. Devolver el menú principal, saludando con el nombre
+                    return ("chat", _get_main_menu(convo.user_display_name))
+                    
+                else:
+                    # Placa no encontrada. Reintentar.
+                    retry_msg = (
+                        f"La placa *{user_input}* no fue encontrada en nuestra base de datos. 😔\n\n"
+                        "Por favor, verifica si la ingresaste correctamente. Si sigues sin poder ingresar, por favor *ingresa el número 2* para ser atendido por un agente para clientes nuevos. 🤝"
+                    )
+                    # El estado no cambia, se mantiene en 'ia_wait_for_placa_or_2'
+                    return ("chat", retry_msg)
+
 
         # --- ESTADO 5: Mostrando el Menú (Esperando opción 1-7) ('ia_show_menu') ---
         elif convo.status == 'ia_show_menu':
@@ -757,7 +781,6 @@ def get_ia_response_and_route(convo, message_body):
         logging.error(f"Error en la máquina de estados de IA: {e}")
         # Fallback de seguridad: enrutar a General
         return ("route", "General")
-
 
 # --- WEBHOOK MODIFICADO PARA BAILEYS (CON RECONOCIMIENTO DE 'A' EN CHAT ABIERTO) ---
 @app.route('/api/baileys/webhook', methods=['POST'])
