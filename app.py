@@ -417,7 +417,8 @@ def get_random_active_role(base_role_title):
 
 # Función para obtener el menú principal (con formato)
 def _get_main_menu(nombre_usuario):
-    nombre_personalizado = f"¡Hola! *{nombre_usuario}*, " if nombre_usuario else "¡Hola! "
+    nombre_display = nombre_usuario if nombre_usuario and not nombre_usuario.startswith('+') else "Cliente"
+    nombre_personalizado = f"¡Hola! *{nombre_display}*, " if nombre_display else "¡Hola! "
     return f"""{nombre_personalizado}Bienvenido a *VTN SEGUROS - Grupo Montenegro*. Para nosotros es un gusto atenderte 🫡
 
 Escribe el *número* de tu solicitud:
@@ -835,6 +836,14 @@ def baileys_webhook():
             
             convo = Conversation(user_phone=sender_phone, bot_role_id=general_role.id)
             
+            # --- CORRECCIÓN CRÍTICA: Inicializar user_display_name ---
+            # Fallback JID (el ID ...@lid)
+            clean_phone = sender_phone.split('@')[0].replace('whatsapp:', '').replace('+', '')
+            
+            convo.user_display_name = clean_phone # Inicializar con el teléfono
+            convo.user_reported_phone = clean_phone
+            # --- FIN CORRECCIÓN CRÍTICA ---
+
             if previous_data:
                 logging.info(f"Usuario conocido encontrado. Nombre: {previous_data.user_display_name}")
                 # Si lo encontramos, copiamos los datos y saltamos al menú
