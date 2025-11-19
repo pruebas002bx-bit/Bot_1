@@ -413,6 +413,17 @@ def get_random_active_role(base_role_title):
 # --- FIN DE NUEVA FUNCIÓN DE BALANCEO ---
 
 
+def _get_dynamic_greeting():
+    # Usamos UTC para el servidor, pero el saludo es genérico.
+    current_hour = datetime.utcnow().hour 
+    
+    if 5 <= current_hour < 12:
+        return "¡Buenos días! ☀️"
+    elif 12 <= current_hour < 19:
+        return "¡Buenas tardes! 👋"
+    else:
+        return "¡Buenas noches! 🌙"
+
 # --- MÁQUINA DE ESTADOS (Funciones Anidadas) ---
 
 # Función para obtener el menú principal (con formato)
@@ -602,13 +613,23 @@ def get_ia_response_and_route(convo, message_body):
             convo.status = 'ia_wait_for_client_type' # Nuevo estado de espera simple
             db.session.add(convo)
             
-            # Nuevo mensaje de bienvenida con el menú 1 o 2
-            welcome_msg = (
-                "¡Hola! Bienvenido a *VTN SEGUROS - Grupo Montenegro*. Para nosotros es un gusto atenderte 🫡\n\n"
-                "Para iniciar, por favor escribe el *número* que te corresponda:\n\n"
-                "*1.* Ya soy cliente (o tengo póliza con VTN). ✅\n"
-                "*2.* Soy un usuario nuevo y deseo cotizar. 📊"
-            )
+            # --- MODIFICACIÓN DEL MENSAJE DE BIENVENIDA MÁS DIRECTO CON EJEMPLO ---
+            dynamic_greeting = _get_dynamic_greeting()
+            
+            welcome_msg = f"""{dynamic_greeting}, bienvenido a *VTN SEGUROS - Grupo Montenegro*! Para nosotros es un gusto atenderte.
+
+Cuéntanos, ¿eres cliente de nosotros?
+
+Escribe:
+*1* si la respuesta es **Sí** 
+*2* si la respuesta es **No** 
+
+---
+*Ejemplo:*
+Si eres cliente, solo escribe *1* y envíalo.
+Si eres usuario nuevo, solo escribe *2* y envíalo."""
+            # --- FIN DE LA MODIFICACIÓN ---
+            
             return ("chat", welcome_msg)
         
         # --- NUEVO ESTADO: Esperando el tipo de cliente (1 o 2) ---
