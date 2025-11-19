@@ -125,13 +125,13 @@ class Message(db.Model):
     __tablename__ = 'messages'
     id = db.Column(db.Integer, primary_key=True)
     conversation_id = db.Column(db.Integer, db.ForeignKey('conversations.id'), nullable=False)
-    sender_type = db.Column(db.String(20), nullable=False) # 'user', 'agent', 'system'
+    # sender_type = db.Column(db.String(20), nullable=False) # COMENTADO: No existe en BD
     content = db.Column(db.Text, nullable=False)
     timestamp = db.Column(db.DateTime(timezone=True), server_default=func.now())
     
-    # --- NUEVAS COLUMNAS PARA MULTIMEDIA ---
-    message_type = db.Column(db.String(20), default='text', nullable=False) # 'text', 'image', 'video'
-    media_url = db.Column(db.String(1024), nullable=True) # URL pública del archivo
+    # --- NUEVAS COLUMNAS PARA MULTIMEDIA (COMENTADAS PORQUE NO EXISTEN EN BD) ---
+    # message_type = db.Column(db.String(20), default='text', nullable=False) 
+    # media_url = db.Column(db.String(1024), nullable=True) 
     # --- FIN DE NUEVAS COLUMNAS ---
 
     conversation = db.relationship('Conversation', back_populates='messages')
@@ -782,20 +782,17 @@ def get_ia_response_and_route(convo, message_body):
         # Fallback de seguridad: enrutar a General
         return ("route", "General")
 
-# --- WEBHOOK MODIFICADO PARA BAILEYS (CON RECONOCIMIENTO DE 'A' EN CHAT ABIERTO) ---
+# --- WEBHOOK MODIFICADO PARA BAILEYS (VERSIÓN SIN COLUMNAS NUEVAS) ---
 @app.route('/api/baileys/webhook', methods=['POST'])
 def baileys_webhook():
     data = request.json
     message_body = data.get('Body')
     sender_phone = data.get('From')
-    message_type = data.get('MessageType', 'text')
-    media_url = data.get('MediaUrl')
-
-
-
-    if (not message_body and not media_url) or not sender_phone:
-        logging.warning("Webhook (Baileys) recibido sin 'Body' o 'MediaUrl', o sin 'From'.")
-        return jsonify({"error": "Faltan 'Body'/'MediaUrl' o 'From'"}), 400
+    # Ignoramos tipos multimedia para que no falle la BD
+    
+    if (not message_body) or not sender_phone:
+        logging.warning("Webhook (Baileys) recibido sin 'Body' o 'From'.")
+        return jsonify({"error": "Faltan datos"}), 400
         
     logging.info(f"Mensaje (Baileys) recibido de {sender_phone}: {message_body}")
 
@@ -803,26 +800,22 @@ def baileys_webhook():
         # Escenario A: Chat abierto y asignado a un humano
         existing_convo = Conversation.query.filter_by(user_phone=sender_phone).order_by(Conversation.created_at.desc()).first()
         
-        # --- INICIO DE CORRECCIÓN CRÍTICA ---
-        # Si el usuario escribe 'A' y el chat está abierto, lo pasamos al menú IA.
+        # Si el usuario escribe 'A' y el chat está abierto
         if existing_convo and existing_convo.status == 'open' and message_body.strip().upper() == 'A':
             logging.info(f"Usuario {sender_phone} escribió 'A'. Devolviendo al menú principal.")
             
-            # Cambiar estado a IA para forzar la respuesta del menú
             existing_convo.status = 'ia_show_menu'
-            existing_convo.unread_count = 0 # Marcar como leído
-            existing_convo.pending_counted = False # Reiniciar contador
+            existing_convo.unread_count = 0 
+            existing_convo.pending_counted = False 
             
-            # Buscamos el nombre para darle un saludo personalizado
             display_name = existing_convo.user_display_name or existing_convo.user_phone.split('@')[0].replace('whatsapp:', '').replace('+', '')
-            
-            # Enviamos el mensaje del menú principal
             menu_message = _get_main_menu(display_name)
             send_reply(sender_phone, menu_message)
 
-            # Guardar mensaje del usuario (la 'A') y la respuesta del sistema
-            user_msg = Message(conversation_id=existing_convo.id, sender_type='user', content=message_body)
-            system_msg = Message(conversation_id=existing_convo.id, sender_type='system', content=menu_message)
+            # Guardar mensaje usuario (SIN sender_type)
+            user_msg = Message(conversation_id=existing_convo.id, content=message_body)
+            # Guardar mensaje sistema (SIN sender_type)
+            system_msg = Message(conversation_id=existing_convo.id, content=menu_message)
             db.session.add_all([user_msg, system_msg])
 
             existing_convo.updated_at = datetime.utcnow()
@@ -830,12 +823,11 @@ def baileys_webhook():
             return jsonify({"status": "returned_to_menu"}), 200
         
         if existing_convo and existing_convo.status == 'open':
-            logging.info(f"Conversación ABIERTA (ID: {existing_convo.id}) encontrada para {sender_phone}. Enviando a agente.")
+            logging.info(f"Conversación ABIERTA (ID: {existing_convo.id}). Enviando a agente.")
             
-            # --- INICIO DE CORRECCIÓN ---
-            new_message = Message(conversation_id=existing_convo.id, sender_type='user', content=message_body, message_type=message_type, media_url=media_url)
-            db.session.add(new_message) # <-- AÑADIR ESTA LÍNEA
-            # --- FIN DE CORRECCIÓN ---
+            # Guardar mensaje (SIN sender_type ni media)
+            new_message = Message(conversation_id=existing_convo.id, content=message_body)
+            db.session.add(new_message)
 
             existing_convo.unread_count = (existing_convo.unread_count or 0) + 1
             existing_convo.updated_at = datetime.utcnow()
@@ -845,33 +837,29 @@ def baileys_webhook():
                 existing_convo.pending_counted = True
             db.session.commit()
             return jsonify({"status": "message_queued"}), 200
-        # --- FIN DE CORRECCIÓN CRÍTICA ---
 
         bot_config = BotConfig.query.first()
         if not bot_config or not bot_config.is_active:
-            logging.info("Bot inactivo. Ignorando mensaje.")
             return jsonify({"status": "bot_inactive"}), 200
         
         if existing_convo and existing_convo.status.startswith('ia_'):
             logging.info(f"Continuando chat IA (ID: {existing_convo.id}, Estado: {existing_convo.status})")
             convo = existing_convo
             
-            # Guardar el mensaje del usuario (ej. "Juan Perez", "sí", "1")
-            user_msg = Message(conversation_id=convo.id, sender_type='user', content=message_body, message_type=message_type, media_url=media_url)
-            db.session.add(user_msg) # <-- AÑADIR ESTA LÍNEA
+            # Guardar mensaje usuario (SIN sender_type)
+            user_msg = Message(conversation_id=convo.id, content=message_body)
+            db.session.add(user_msg)
             
-            # Obtener la respuesta de la máquina de estados
             action, data = get_ia_response_and_route(convo, message_body)
 
-        # Escenario C: Conversación nueva (o 'closed')
+        # Escenario C: Conversación nueva
         else:
             logging.info(f"Creando nueva conversación IA para {sender_phone}.")
             general_role = BotRole.query.filter_by(title='General').first()
             if not general_role:
-                 logging.error("CRÍTICO: No se encontró el rol 'General' para iniciar chats IA.")
-                 return jsonify({"error": "Configuración interna del servidor"}), 500
+                 # Fallback si no existe rol general
+                 return jsonify({"error": "Falta rol General"}), 500
 
-            # --- Buscar datos anteriores ---
             previous_data = Conversation.query.filter(
                 Conversation.user_phone == sender_phone,
                 Conversation.user_display_name.isnot(None)
@@ -880,104 +868,77 @@ def baileys_webhook():
             convo = Conversation(user_phone=sender_phone, bot_role_id=general_role.id)
             
             if previous_data:
-                logging.info(f"Usuario conocido encontrado. Nombre: {previous_data.user_display_name}")
-                # Si lo encontramos, copiamos los datos y saltamos al menú
                 convo.user_display_name = previous_data.user_display_name
                 convo.user_reported_phone = previous_data.user_reported_phone
-                convo.status = 'ia_greeting_known' # El nuevo estado
+                convo.status = 'ia_greeting_known'
             else:
-                # Si no, iniciamos el flujo normal de bienvenida
                 convo.status = 'ia_greeting'
 
             db.session.add(convo)
-            db.session.flush() # Para obtener el convo.id
+            db.session.flush()
             
-            # Guardar el primer mensaje del usuario (ej. "Hola")
-            user_msg = Message(conversation_id=convo.id, sender_type='user', content=message_body, message_type=message_type, media_url=media_url)
-            db.session.add(user_msg) # <-- AÑADIR ESTA LÍNEA
+            # Guardar primer mensaje (SIN sender_type)
+            user_msg = Message(conversation_id=convo.id, content=message_body)
+            db.session.add(user_msg) 
             
-            # Obtener la respuesta de la máquina de estados
             action, data = get_ia_response_and_route(convo, message_body)
         
         # --- PROCESAR LA ACCIÓN DE LA IA ---
         
         if action == "route":
             role_title = data
-            
-            # --- INICIO DE LÓGICA DE BALANCEO ---
-            # target_role = BotRole.query.filter_by(title=role_title, status='Activo').first()
             target_role = get_random_active_role(role_title)
-            # --- FIN DE LÓGICA DE BALANCEO ---
             
             if not target_role:
-                # --- MODIFICACIÓN DE LOG ---
-                logging.error(f"IA enrutó a '{role_title}' pero no se encontró ningún rol activo (ni base ni duplicados).")
-                # --- FIN DE MODIFICACIÓN ---
-                ia_response_msg = f"Ups, el departamento de '{role_title}' no está disponible en este momento. ¿Puedo ayudarte con algo más?"
+                ia_response_msg = f"Ups, el departamento de '{role_title}' no está disponible."
                 send_reply(sender_phone, ia_response_msg)
-                ia_msg_db = Message(conversation_id=convo.id, sender_type='system', content=ia_response_msg)
+                # Guardar sistema (SIN sender_type)
+                ia_msg_db = Message(conversation_id=convo.id, content=ia_response_msg)
                 db.session.add(ia_msg_db)
                 db.session.commit()
                 return jsonify({"status": "route_failed"}), 200
             
-            logging.info(f"IA enrutó chat {convo.id} a '{target_role.title}' (Rol seleccionado: {target_role.title}). Cambiando status a 'open'.")
             convo.status = 'open'
             convo.bot_role_id = target_role.id
             convo.pending_counted = True
-            
             target_role.chats_received = (target_role.chats_received or 0) + 1
             target_role.chats_pending = (target_role.chats_pending or 0) + 1
 
             transfer_message = f"¡Entendido! Un agente del área de {target_role.title} te atenderá pronto."
             send_reply(sender_phone, transfer_message)
             
-            system_msg_db = Message(conversation_id=convo.id, sender_type='system', content=f"Chat enrutado por IA a {target_role.title}.")
-            ia_msg_db = Message(conversation_id=convo.id, sender_type='system', content=transfer_message)
+            # Guardar mensajes sistema (SIN sender_type)
+            system_msg_db = Message(conversation_id=convo.id, content=f"Chat enrutado por IA a {target_role.title}.")
+            ia_msg_db = Message(conversation_id=convo.id, content=transfer_message)
             db.session.add_all([system_msg_db, ia_msg_db])
             
         elif action == "route_and_message":
-            # (Este bloque ya no se usa para enrutar, pero se mantiene la lógica de balanceo por si acaso)
             role_title = data['role']
-            full_response = data['message'] # Es la respuesta completa con formato
-            
-            # --- INICIO DE LÓGICA DE BALANCEO ---
-            # target_role = BotRole.query.filter_by(title=role_title, status='Activo').first()
+            full_response = data['message']
             target_role = get_random_active_role(role_title)
-            # --- FIN DE LÓGICA DE BALANCEO ---
 
-            # 1. Enviar mensaje detallado al usuario
             send_reply(sender_phone, full_response)
             
-            # 2. Guardar el mensaje en la BD
-            ia_msg_db = Message(conversation_id=convo.id, sender_type='system', content=full_response)
+            # Guardar respuesta IA (SIN sender_type)
+            ia_msg_db = Message(conversation_id=convo.id, content=full_response)
             db.session.add(ia_msg_db)
             
-            if not target_role:
-                # --- MODIFICACIÓN DE LOG ---
-                logging.error(f"IA intentó enrutar a '{role_title}' pero no se encontró ningún rol activo (ni base ni duplicados).")
-                # --- FIN DE MODIFICACIÓN ---
-                db.session.commit() 
-                return jsonify({"status": "route_and_message_failed"}), 200
-
-            # 3. Enrutar y cambiar estado a 'open'
-            logging.info(f"IA envió mensaje y enrutó chat {convo.id} a '{target_role.title}' (Rol seleccionado: {target_role.title}). Cambiando status a 'open'.")
-            convo.status = 'open'
-            convo.bot_role_id = target_role.id
-            convo.pending_counted = True
-            
-            target_role.chats_received = (target_role.chats_received or 0) + 1
-            target_role.chats_pending = (target_role.chats_pending or 0) + 1
-            
-            # 4. Registrar enrutamiento en la BD
-            system_msg_db = Message(conversation_id=convo.id, sender_type='system', content=f"Chat enrutado por IA a {target_role.title}.")
-            db.session.add(system_msg_db)
+            if target_role:
+                convo.status = 'open'
+                convo.bot_role_id = target_role.id
+                convo.pending_counted = True
+                target_role.chats_received = (target_role.chats_received or 0) + 1
+                target_role.chats_pending = (target_role.chats_pending or 0) + 1
+                
+                # Guardar log sistema (SIN sender_type)
+                system_msg_db = Message(conversation_id=convo.id, content=f"Chat enrutado por IA a {target_role.title}.")
+                db.session.add(system_msg_db)
 
         elif action == "chat":
-            # IA Sigue Chateando (ej. "ask phone", "confirm details", "menu")
             ia_response_msg = data
             send_reply(sender_phone, ia_response_msg)
-            # Guardar la respuesta del bot
-            ia_msg_db = Message(conversation_id=convo.id, sender_type='system', content=ia_response_msg)
+            # Guardar respuesta IA (SIN sender_type)
+            ia_msg_db = Message(conversation_id=convo.id, content=ia_response_msg)
             db.session.add(ia_msg_db)
 
         convo.updated_at = datetime.utcnow()
@@ -987,7 +948,7 @@ def baileys_webhook():
     except Exception as e:
         db.session.rollback()
         logging.error(f"Error fatal en el webhook de Baileys: {e}")
-        logging.exception(e) 
+        # logging.exception(e) 
         return jsonify({"error": "Error interno del servidor"}), 500
 
 @app.route('/api/chats', methods=['GET'])
@@ -1073,13 +1034,13 @@ def get_chat_messages(convo_id):
         
     db.session.commit()
     
-    # --- MODIFICADO: Enviar tipo de mensaje y URL ---
+    # --- MODIFICADO: Valores por defecto para columnas faltantes ---
     messages = [
         {
-            "sender": msg.sender_type, 
+            "sender": "user", # Valor por defecto ya que no hay columna sender_type
             "text": msg.content, 
-            "type": msg.message_type, 
-            "url": msg.media_url
+            "type": "text",   # Valor por defecto
+            "url": None       # Valor por defecto
         } 
         for msg in convo.messages
     ]
